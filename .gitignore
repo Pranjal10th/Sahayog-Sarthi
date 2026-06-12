@@ -1,2 +1,13 @@
-node_modules/
-.env
+# Backend Filters
+backend/node_modules/
+backend/.env
+
+# Frontend Filters
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env*.local
+
+# System Files
+.DS_Store
+Thumbs.db
