@@ -1,13 +1,7 @@
-# Backend Filters
-backend/node_modules/
-backend/.env
-
-# Frontend Filters
-frontend/node_modules/
-frontend/.next/
-frontend/out/
-frontend/.env*.local
-
-# System Files
-.DS_Store
-Thumbs.db
+node_modules/
+.next/
+.env
+.env.local
+dist/
+build/
+uploads/kyc/*

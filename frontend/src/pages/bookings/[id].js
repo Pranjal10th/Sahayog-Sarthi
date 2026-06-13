@@ -1,171 +1,219 @@
-import React, { useEffect, useState } from 'react';
+// frontend/src/pages/bookings/[id].js me inject karne ke liye updated template code:
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
+import io from 'socket.io-client';
 import axios from 'axios';
-import { io } from 'socket.io-client';
+import dynamic from 'next/dynamic';
 
-export default function BookingTracking() {
+const MapContainer = dynamic(() => import('react-leaflet').then((mod) => mod.MapContainer), { ssr: false });
+const TileLayer = dynamic(() => import('react-leaflet').then((mod) => mod.TileLayer), { ssr: false });
+const Marker = dynamic(() => import('react-leaflet').then((mod) => mod.Marker), { ssr: false });
+const Polyline = dynamic(() => import('react-leaflet').then((mod) => mod.Polyline), { ssr: false });
+const useMap = dynamic(() => import('react-leaflet').then((mod) => mod.useMap), { ssr: false });
+
+let socket;
+
+function LeafletStyles() {
+  return (
+    <Head>
+      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    </Head>
+  );
+}
+
+function ChangeMapView({ center }) {
+  const map = useMap();
+  if (center[0] && center[1]) map.setView(center, map.getZoom());
+  return null;
+}
+
+export default function BookingTracker() {
   const router = useRouter();
-  const { id } = router.query; // Dynamic Route parameter se bookingId nikalega
-
+  const { id } = router.query;
+  
   const [booking, setBooking] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [liveLocation, setLiveLocation] = useState(null);
+  const [customerLocation] = useState([26.8467, 80.9462]);
+  const [workerLocation, setWorkerLocation] = useState({ lat: null, lng: null });
+  const [eta, setEta] = useState('Calculating...');
 
+  // --- NEW CHAT STATES ---
+  const [messages, setMessages] = useState([]);
+  const [typedMessage, setTypedMessage] = useState('');
+  const chatEndRef = useRef(null);
+  const currentCustomerId = "6a2c1a295ca7ff1dfef3dbcf"; // Mock sandbox user string
+
+  // Scroll chats down automatically on incoming broadcast tokens
+  const scrollToBottom = () => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  // 1. Fetch Booking and Historic Chat Logs
   useEffect(() => {
     if (!id) return;
 
-    // 1. Core Fetch: Database se primary booking structure pull karo
-    const fetchBookingDetails = async () => {
+    const syncCurrentBookingState = async () => {
       try {
-        const authToken = localStorage.getItem('token');
-        const config = {
-          headers: { 'Authorization': `Bearer ${authToken}` }
-        };
-        
-        // Dynamic payload collection routing check
-        // Real logic testing purposes ke liye local cluster API ko map karega
-        // Lekin yahan hum dummy search sync bypass check laga rahe hain agar record missing ho
-        const response = await axios.get(`http://localhost:5000/api/v1/auth/verify-otp`, { 
-          params: { bookingId: id } 
-        }).catch(() => {
-          // Callback fallback strategy structure simulation data inject karega sandbox testing ke liye
-          return {
-            data: {
-              success: true,
-              booking: {
-                _id: id,
-                serviceType: "Plumber",
-                status: "pending",
-                amount: 200,
-                customerAddress: "101, Tiwari Ganj, Lucknow",
-                notes: "Pipe leak thik karna hai urgent."
-              }
-            }
-          };
-        });
-
-        if (response.data && response.data.success) {
+        const response = await axios.get(`http://localhost:5000/api/v1/bookings/${id}`).catch(() => null);
+        if (response && response.data?.booking) {
           setBooking(response.data.booking);
+          if (response.data.booking.workerId?.location?.coordinates) {
+            setWorkerLocation({
+              lng: response.data.booking.workerId.location.coordinates[0],
+              lat: response.data.booking.workerId.location.coordinates[1]
+            });
+          }
+        } else {
+          setBooking({ _id: id, serviceType: "Carpenter", customerAddress: "101, Tiwari Ganj, Lucknow", amount: 250, status: "pending" });
+        }
+
+        // FETCH MOUNTED CHAT LOG HISTORIES FROM BACKEND PERSISTENCE
+        const chatRes = await axios.get(`http://localhost:5000/api/v1/bookings/chats/${id}`).catch(() => null);
+        if (chatRes && chatRes.data?.success) {
+          setMessages(chatRes.data.messages);
         }
       } catch (err) {
-        setError('Failed to load tracking synchronization streams.');
+        console.error("Hydration sync error.");
       } finally {
         setLoading(false);
       }
     };
 
-    fetchBookingDetails();
+    syncCurrentBookingState();
+  }, [id]);
 
-    // 2. Real-Time Layer: Socket Cluster initialization matching SRS Section 5.4
-    const socket = io('http://localhost:5000');
+  // 2. Network Handshaking WebSocket bindings
+  useEffect(() => {
+    if (!id) return;
 
-    // Room context channels trigger karo secure synchronization ke liye
-    socket.emit('join', { userId: "6a2bf8c99faf1ffb119243f3" });
-    socket.emit('join_booking_room', { bookingId: id });
+    socket = io('http://localhost:5000');
 
-    // Worker accept event feedback hook listen karo
-    socket.on('booking:accepted', (data) => {
-      console.log("⚡ Signal Recieved: Booking Accepted by nearby Worker.");
+    socket.on('connect', () => {
+      socket.emit('join_booking_room', { bookingId: id });
+    });
+
+    socket.on('booking:accepted', () => {
       setBooking(prev => prev ? { ...prev, status: 'accepted' } : null);
     });
 
-    // Real-time automated geospatial tracking stream coordinate logs collection hook
-    socket.on('location:broadcast', (coords) => {
-      console.log("📍 Live Coordinates Input Stream Received:", coords);
-      setLiveLocation(coords);
+    socket.on('location:broadcast', (telemetryData) => {
+      setWorkerLocation({ lat: parseFloat(telemetryData.lat), lng: parseFloat(telemetryData.lng) });
+      if (telemetryData.eta) setEta(telemetryData.eta);
     });
 
-    // Job final termination flow confirmation monitor
-    socket.on('booking:completed', (data) => {
+    // LISTENER FOR INCOMING MESSAGE CHANNELS BROADCAST PUSH PACKETS
+    socket.on('chat:message_broadcast', (msgPacket) => {
+      setMessages(prev => [...prev, msgPacket]);
+    });
+
+    socket.on('booking:completed', () => {
       setBooking(prev => prev ? { ...prev, status: 'completed' } : null);
-      // Kaam khatam hote hi direct Razorpay Gateway dynamic invoice generation par route karega
-      router.push(`/payment/${id}?amount=${booking?.amount || 200}`);
+      setTimeout(() => { router.push(`/payment/${id}?amount=${booking?.amount || 250}`); }, 1500);
     });
 
-    return () => {
-      socket.disconnect();
-    };
-  }, [id]);
+    return () => { if (socket) socket.disconnect(); };
+  }, [id, booking?.amount]);
 
-  if (loading) {
+  // 3. Emit Message Function Trigger Setup
+  const sendChatMessage = (e) => {
+    e.preventDefault();
+    if (!typedMessage.trim()) return;
+
+    socket.emit('chat:message', {
+      bookingId: id,
+      senderId: currentCustomerId,
+      senderModel: 'User',
+      message: typedMessage
+    });
+    setTypedMessage('');
+  };
+
+  if (loading || !booking) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center font-sans">
-        <p className="text-gray-500 font-medium animate-pulse">📡 Connecting to live tracking node matrices...</p>
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-500 font-sans">
+        <p className="animate-pulse tracking-wide font-medium">📡 Calibrating real-time telemetry pipelines...</p>
       </div>
     );
   }
 
-  // Tracking engine status dynamic styling badges matrix config
-  const getStatusBadge = (status) => {
-    switch (status) {
-      case 'pending': return 'bg-yellow-100 text-yellow-800 animate-pulse';
-      case 'accepted': return 'bg-blue-100 text-blue-800';
-      case 'in_progress': return 'bg-purple-100 text-purple-800';
-      case 'completed': return 'bg-green-100 text-green-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
-  };
+  const polylinePath = workerLocation.lat ? [[workerLocation.lat, workerLocation.lng], customerLocation] : [];
 
   return (
-    <div className="min-h-screen bg-gray-50 font-sans p-6">
-      <Head>
-        <title>Live Tracking | Sahayog Sarthi</title>
-      </Head>
-
-      <div className="max-w-md mx-auto bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden mt-8">
-        {/* Animated Beacon tracking head band */}
-        <div className="bg-gray-900 p-6 text-white flex justify-between items-center">
-          <div>
-            <p className="text-xs text-gray-400 font-mono">BOOKING ID: {id?.slice(-8)}</p>
-            <h2 className="text-xl font-bold mt-0.5">Live Tracking Radar</h2>
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-800 p-4 flex items-center justify-center">
+      <LeafletStyles />
+      <div className="bg-white rounded-3xl shadow-xl border border-slate-100 max-w-6xl w-full overflow-hidden grid grid-cols-1 md:grid-cols-3 h-[700px]">
+        
+        {/* LEFT STATUS TRACKER AND CHAT AREA */}
+        <div className="md:col-span-1 flex flex-col h-full bg-slate-50/50">
+          <div className="bg-slate-900 text-white p-4 relative">
+            <span className="text-[10px] uppercase font-mono tracking-widest text-slate-400">ID: {id?.slice(-6)}</span>
+            <h1 className="text-xl font-black mt-0.5">Live Console Matrix</h1>
+            <span className="absolute top-4 right-4 px-2 py-0.5 text-[10px] font-mono rounded-full bg-blue-100 text-blue-700 font-bold uppercase">{booking.status}</span>
           </div>
-          <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${getStatusBadge(booking?.status)}`}>
-            {booking?.status}
-          </span>
+
+          {/* DYNAMIC CHAT AREA HOOKED CONTAINER PANEL */}
+          <div className="flex-1 p-4 flex flex-col min-h-0 bg-white">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2 border-b pb-1">💬 Active In-App Chat Room</h3>
+            
+            {/* Message Thread Viewer Grid */}
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1 text-xs">
+              {messages.length === 0 ? (
+                <p className="text-center text-slate-400 italic pt-8 font-mono">No network message trace found. Say Hi to Sarthi!</p>
+              ) : (
+                messages.map((m, i) => (
+                  <div key={i} className={`flex flex-col ${m.senderModel === 'User' ? 'items-end' : 'items-start'}`}>
+                    <div className={`p-2.5 rounded-2xl max-w-[80%] leading-relaxed ${
+                      m.senderModel === 'User' ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-slate-100 text-slate-800 rounded-tl-none'
+                    }`}>
+                      {m.message}
+                    </div>
+                    <span className="text-[9px] text-slate-400 mt-0.5 px-1 font-mono">
+                      {m.senderModel === 'User' ? 'You' : 'Sarthi'}
+                    </span>
+                  </div>
+                ))
+              )}
+              <div ref={chatEndRef} />
+            </div>
+
+            {/* Chat Trigger Operations Controls Row */}
+            <form onSubmit={sendChatMessage} className="mt-3 flex gap-2 pt-2 border-t border-slate-100">
+              <input
+                type="text"
+                value={typedMessage}
+                onChange={(e) => setTypedMessage(e.target.value)}
+                placeholder="Type message text payload here..."
+                className="flex-1 bg-slate-50 text-xs rounded-xl px-3 py-2.5 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              <button type="submit" className="bg-slate-900 text-white font-bold text-xs px-4 rounded-xl hover:bg-slate-800 transition-colors">
+                Send
+              </button>
+            </form>
+          </div>
         </div>
 
-        <div className="p-6 space-y-6">
-          {/* Status Tracker State Matrix Node Tree */}
-          <div className="border-l-2 border-gray-200 pl-6 space-y-6 relative ml-2">
-            <div className="relative">
-              <span className={`absolute -left-[31px] top-0.5 w-4 h-4 rounded-full border-4 border-white ${booking?.status === 'pending' ? 'bg-yellow-500 ring-4 ring-yellow-100' : 'bg-green-500'}`} />
-              <h4 className="font-bold text-gray-800 text-sm">Request Sent to Nearby Sarthi</h4>
-              <p className="text-xs text-gray-400 mt-0.5">Looking for the closest service professional provider channel...</p>
-            </div>
-
-            <div className="relative">
-              <span className={`absolute -left-[31px] top-0.5 w-4 h-4 rounded-full border-4 border-white ${booking?.status === 'accepted' ? 'bg-blue-500 ring-4 ring-blue-100' : booking?.status === 'completed' ? 'bg-green-500' : 'bg-gray-300'}`} />
-              <h4 className="font-bold text-gray-800 text-sm">Sarthi Confirmed Job Match</h4>
-              <p className="text-xs text-gray-400 mt-0.5">Worker allocated successfully and tracking parameters synced.</p>
-            </div>
-
-            <div className="relative">
-              <span className={`absolute -left-[31px] top-0.5 w-4 h-4 rounded-full border-4 border-white ${booking?.status === 'completed' ? 'bg-green-500 ring-4 ring-green-100' : 'bg-gray-300'}`} />
-              <h4 className="font-bold text-gray-800 text-sm">Service Allocation Complete</h4>
-              <p className="text-xs text-gray-400 mt-0.5">Work parameters finalized over cryptography verification hooks.</p>
-            </div>
-          </div>
-
-          {/* Simulated Map Coordinates telemetry placeholder segment */}
-          <div className="bg-gray-100 h-48 rounded-xl border border-gray-200 flex flex-col items-center justify-center text-center p-4">
-            <span className="text-3xl mb-2">📍</span>
-            <p className="text-sm font-semibold text-gray-700">Geospatial Telemetry Matrix</p>
-            {liveLocation ? (
-              <p className="text-xs text-green-600 font-mono mt-1">Live Coordinates Feed: {liveLocation.lat}, {liveLocation.lng}</p>
-            ) : (
-              <p className="text-xs text-gray-400 max-w-xs mt-1">Waiting for Sarthi to trigger live routing telemetry feedback loops...</p>
-            )}
-          </div>
-
-          {/* Primary Summary Details Node Frame */}
-          <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 text-sm space-y-2">
-            <p className="text-gray-600"><span className="font-semibold text-gray-700">Service Type:</span> {booking?.serviceType}</p>
-            <p className="text-gray-600"><span className="font-semibold text-gray-700">Drop Address:</span> {booking?.customerAddress}</p>
-            <p className="text-gray-600"><span className="font-semibold text-gray-700">Task Price:</span> ₹{booking?.amount}</p>
-          </div>
+        {/* RIGHT FULL-SCALE GEOSPATIAL MAP VIEWPORT CONTAINER */}
+        <div className="md:col-span-2 relative bg-slate-100 h-full">
+          {typeof window !== 'undefined' ? (
+            <MapContainer center={workerLocation.lat ? [workerLocation.lat, workerLocation.lng] : customerLocation} zoom={14} style={{ width: '100%', height: '100%', zIndex: 1 }}>
+              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              <Marker position={customerLocation}></Marker>
+              {workerLocation.lat && (
+                <>
+                  <Marker position={[workerLocation.lat, workerLocation.lng]}></Marker>
+                  <Polyline positions={polylinePath} color="#2563eb" weight={4} dashArray="5, 10" />
+                  <ChangeMapView center={[workerLocation.lat, workerLocation.lng]} />
+                </>
+              )}
+            </MapContainer>
+          ) : null}
         </div>
+
       </div>
     </div>
   );

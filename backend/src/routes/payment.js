@@ -4,8 +4,8 @@ import protect from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
 
-router.post('/create-order', protect, createPaymentOrder); // /api/v1/payments/create-order
-router.post('/verify', protect, verifyPaymentSignature);    // /api/v1/payments/verify
+router.post('/create-order', protect, createPaymentOrder); 
+router.post('/verify', protect, verifyPaymentSignature);    
 
-// CRITICAL FIX: Yeh line lagana zaroori hai default export ke liye
+// Export hook mapping for index.js configuration
 export default router;

@@ -31,7 +31,7 @@ export const createPaymentOrder = async (req, res) => {
         order: {
           id: `order_mock_${crypto.randomBytes(6).toString('hex')}`,
           entity: "order",
-          amount: booking.amount * 100, // paise mein conversion [cite: 143]
+          amount: booking.amount * 100, // paise mein conversion
           amount_paid: 0,
           amount_due: booking.amount * 100,
           currency: "INR",
@@ -41,7 +41,7 @@ export const createPaymentOrder = async (req, res) => {
       });
     }
 
-    // Real Razorpay Execution (Jab real credentials daaloge tab chalega)
+    // Real Razorpay Execution
     const options = {
       amount: booking.amount * 100, 
       currency: 'INR',
@@ -55,7 +55,7 @@ export const createPaymentOrder = async (req, res) => {
   }
 };
 
-// 2. Verify Payment Signature
+// 2. Verify Payment Signature & Sarthi Wallet Settlement
 export const verifyPaymentSignature = async (req, res) => {
   const { bookingId, razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
 
@@ -64,15 +64,21 @@ export const verifyPaymentSignature = async (req, res) => {
     if (!booking) return res.status(404).json({ error: 'Booking record not found.' });
 
     // Sandbox validation bypass flag check
-    if (razorpay_order_id.startsWith('order_mock_')) {
+    if (razorpay_order_id && razorpay_order_id.startsWith('order_mock_')) {
       await Booking.findByIdAndUpdate(bookingId, { paymentStatus: 'paid' });
       
       const commissionRate = Number(process.env.PLATFORM_COMMISSION) || 0.15;
       const netEarnings = booking.amount * (1 - commissionRate);
 
-      await Worker.findByIdAndUpdate(booking.workerId, {
-        $inc: { walletBalance: netEarnings }
-      });
+      // Wallet atomic settlement trigger increment query
+      const updatedWorker = await Worker.findByIdAndUpdate(
+        booking.workerId, 
+        { $inc: { walletBalance: netEarnings } },
+        { returnDocument: 'after' }
+      );
+
+      console.log(`💰 [WALLET SETTLEMENT] Sandbox Pay Verified. Transferred ₹${netEarnings} to Sarthi Wallet.`);
+      console.log(`📈 New Balance for Sarthi ${booking.workerId}: ₹${updatedWorker.walletBalance}`);
 
       return res.status(200).json({ 
         success: true, 
@@ -82,7 +88,7 @@ export const verifyPaymentSignature = async (req, res) => {
       });
     }
 
-    // Standard Cryptographic Production verification [cite: 262]
+    // Standard Cryptographic Production verification 
     const text = razorpay_order_id + "|" + razorpay_payment_id;
     const generated_signature = crypto
       .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET || 'placeholder_secret')
@@ -94,9 +100,13 @@ export const verifyPaymentSignature = async (req, res) => {
       const commissionRate = Number(process.env.PLATFORM_COMMISSION) || 0.15;
       const netEarnings = booking.amount * (1 - commissionRate);
 
-      await Worker.findByIdAndUpdate(booking.workerId, {
-        $inc: { walletBalance: netEarnings }
-      });
+      const updatedWorker = await Worker.findByIdAndUpdate(
+        booking.workerId, 
+        { $inc: { walletBalance: netEarnings } },
+        { returnDocument: 'after' }
+      );
+
+      console.log(`💰 [WALLET SETTLEMENT] Production Pay Verified. Transferred ₹${netEarnings} to Sarthi Wallet.`);
 
       return res.status(200).json({ success: true, message: 'Payment verified!', booking });
     } else {
