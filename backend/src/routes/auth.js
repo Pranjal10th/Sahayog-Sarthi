@@ -1,10 +1,3 @@
-import express from 'express';
-import { sendOTP, verifyOTP, registerWorker } from '../controllers/authController.js';
-
-const router = express.Router();
-
-router.post('/send-otp', sendOTP);         // /api/v1/auth/send-otp 
-router.post('/verify-otp', verifyOTP);     // /api/v1/auth/verify-otp 
-router.post('/register/worker', registerWorker); // /api/v1/auth/register/worker 
-
-export default router;
+// backend/src/routes/auth.js (Backward Compatibility Proxy Wrapper)
+import authRouter from '../modules/auth/interfaces/http/routes/authRoutes.js';
+export default authRouter;

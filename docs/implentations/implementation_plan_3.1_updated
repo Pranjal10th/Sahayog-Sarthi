@@ -1,0 +1,193 @@
+# Implementation Plan: Clean Architecture Migration (Auth Module Only)
+
+This document outlines the detailed migration plan to refactor the Authentication and Registration logic of Sahayog Sarthi into Clean Architecture. In compliance with user instructions:
+*   Refactoring is strictly limited to the **Auth Module** (Phase 3). Other modules (Bookings, Payments, Reviews, Chats) remain untouched.
+*   **No code changes** will be executed until this design and migration plan are reviewed and approved.
+*   **100% backward compatibility** is guaranteed for all incoming routes and existing database/model imports across other modules.
+
+---
+
+## 1. Existing Structure
+
+Currently, Auth logic is distributed across standard MVC-style directories in `backend/src`:
+
+*   **HTTP Route Entrypoint**: [auth.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/routes/auth.js)
+    *   Defines Express routes for `/send-otp`, `/verify-otp`, `/register/worker`.
+*   **HTTP Controller**: [authController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/authController.js)
+    *   Handles HTTP requests, runs input validations, coordinates database operations, and calls token generator.
+*   **Mongoose Models**:
+    *   [User.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/User.js) (Customer Mongoose Schema and Model)
+    *   [Worker.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/Worker.js) (Worker Mongoose Schema and Model)
+*   **Auth Services**: [authService.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/services/authService.js)
+    *   Contains in-memory OTP stores, OTP generation/validation logic, and JWT token signing.
+
+---
+
+## 2. New Clean Architecture Structure
+
+We will introduce a clean, decoupled layer structure inside `backend/src/modules/auth/`. Layers are defined such that dependency flows strictly inward:
+`Domain ➔ Application ➔ Infrastructure ➔ Interfaces/Presentation`
+
+```text
+backend/src/modules/auth/
+├── domain/                                     # Layer 1: Core Business Domain
+│   ├── entities/
+│   │   ├── User.js                             # Pure Domain Entity for Customers
+│   │   └── Worker.js                           # Pure Domain Entity for Workers
+│   └── value-objects/
+│       └── MobileNumber.js                     # Enforces valid 10-digit mobile rule
+│
+├── application/                                # Layer 2: Application Use Cases & Ports
+│   ├── ports/                                  # Repository and service interfaces (ports)
+│   │   ├── UserRepositoryPort.js
+│   │   ├── WorkerRepositoryPort.js
+│   │   ├── SmsPort.js
+│   │   ├── TokenPort.js
+│   │   └── OtpStorePort.js
+│   └── use-cases/                              # Pure business use cases
+│       ├── SendOtpUseCase.js
+│       ├── VerifyOtpUseCase.js
+│       └── RegisterWorkerUseCase.js
+│
+├── infrastructure/                             # Layer 3: Frameworks & Third-Party Adapters
+│   ├── persistence/
+│   │   ├── schemas/                            # Mongoose Schemas (Relocated models)
+│   │   │   ├── UserSchema.js
+│   │   │   └── WorkerSchema.js
+│   │   ├── mappers/                            # Domain ⟷ Persistence Mapper functions
+│   │   │   ├── UserMapper.js
+│   │   │   └── WorkerMapper.js
+│   │   └── repositories/                       # Concrete Mongo database repositories
+│   │       ├── MongoUserRepository.js
+│   │       └── MongoWorkerRepository.js
+│   ├── services/                               # Service implementations (SMS, JWT, OTP Cache)
+│   │   ├── SmsService.js                       # Simulated SMS delivery console logger
+│   │   ├── JwtTokenService.js                  # jsonwebtoken wrapper
+│   │   └── InMemoryOtpStore.js                 # Memory store matching legacy behavior
+│   └── di/
+│       └── container.js                        # Manual DI wiring for Use Cases & Controllers
+│
+└── interfaces/                                 # Layer 4: Presentation & Input Drivers
+    └── http/
+        ├── controllers/
+        │   └── AuthController.js               # Express Controller (parses input, handles outputs)
+        └── routes/
+            └── authRoutes.js                   # Express Route definitions
+```
+
+---
+
+## 3. Files to be Moved or Created
+
+### 3.1 Files to be Relocated (Moved)
+*   `src/models/User.js` ➔ Moved to [UserSchema.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/infrastructure/persistence/schemas/UserSchema.js). The file contents remain structurally identical (Mongoose Schema definition) but will be renamed/reorganized.
+*   `src/models/Worker.js` ➔ Moved to [WorkerSchema.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/infrastructure/persistence/schemas/WorkerSchema.js).
+
+### 3.2 New Files to be Created
+
+#### Domain Layer
+*   [User.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/domain/entities/User.js): Holds pure domain model variables and state (e.g. `isBlocked`).
+*   [Worker.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/domain/entities/Worker.js): Holds worker domain model variables and state (e.g. `kycStatus`).
+*   [MobileNumber.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/domain/value-objects/MobileNumber.js): A value object validating that the mobile number is exactly 10 digits and non-empty.
+
+#### Application Layer (Ports & Use Cases)
+*   **Ports**: Interface/abstract class stubs establishing structural dependencies.
+    *   [UserRepositoryPort.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/application/ports/UserRepositoryPort.js)
+    *   [WorkerRepositoryPort.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/application/ports/WorkerRepositoryPort.js)
+    *   [SmsPort.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/application/ports/SmsPort.js)
+    *   [TokenPort.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/application/ports/TokenPort.js)
+    *   [OtpStorePort.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/application/ports/OtpStorePort.js)
+*   **Use Cases**: Coordinates actions without referencing express, mongoose, or jsonwebtoken directly.
+    *   [SendOtpUseCase.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/application/use-cases/SendOtpUseCase.js)
+    *   [VerifyOtpUseCase.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/application/use-cases/VerifyOtpUseCase.js)
+    *   [RegisterWorkerUseCase.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/application/use-cases/RegisterWorkerUseCase.js)
+
+#### Infrastructure Layer (Adapters)
+*   **Persistence Mappers**:
+    *   [UserMapper.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/infrastructure/persistence/mappers/UserMapper.js)
+    *   [WorkerMapper.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/infrastructure/persistence/mappers/WorkerMapper.js)
+*   **Repositories**:
+    *   [MongoUserRepository.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/infrastructure/persistence/repositories/MongoUserRepository.js)
+    *   [MongoWorkerRepository.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/infrastructure/persistence/repositories/MongoWorkerRepository.js)
+*   **Infrastructure Services**:
+    *   [InMemoryOtpStore.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/infrastructure/services/InMemoryOtpStore.js)
+    *   [SmsService.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/infrastructure/services/SmsService.js)
+    *   [JwtTokenService.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/infrastructure/services/JwtTokenService.js)
+*   **DI Configuration**:
+    *   [container.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/infrastructure/di/container.js): Wires and exports singletons of repositories, services, and use cases.
+
+#### Interfaces Layer
+*   [AuthController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/interfaces/http/controllers/AuthController.js): Class implementing Express handler signatures and binding to Use Cases via container injections.
+*   [authRoutes.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/interfaces/http/routes/authRoutes.js): Connects HTTP router verbs to `AuthController` handler mappings.
+
+---
+
+## 4. Import Changes
+
+No external modules (Bookings, Payments, etc.) will have their imports broken. Instead, we use proxy wrapper entrypoints. 
+Internal Auth module imports will use clean relative paths starting inside the `src/modules/auth/` directory.
+
+---
+
+## 5. Backward Compatibility Strategy
+
+This refactoring must not break other files or existing tests. We resolve this by putting **Proxy / Wrapper Files** at all legacy paths:
+
+### 5.1 Route Wrapper Proxy
+The file [backend/src/routes/auth.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/routes/auth.js) will be emptied and replaced with:
+```javascript
+// backend/src/routes/auth.js (Backward Compatibility Proxy)
+import authRouter from '../modules/auth/interfaces/http/routes/authRoutes.js';
+export default authRouter;
+```
+*Effect:* `backend/src/index.js` which mounts `app.use('/api/v1/auth', authRoutes)` continues to work instantly without edit.
+
+### 5.2 Model Wrapper Proxies
+To ensure other modules and controllers (e.g. `bookingController.js`, `review.js`, `paymentController.js`) and tests can still import `User` and `Worker` models from `src/models/`, we leave proxy files at their original locations:
+
+*   **User Model Proxy** [backend/src/models/User.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/User.js):
+    ```javascript
+    // backend/src/models/User.js (Backward Compatibility Proxy)
+    import User from '../modules/auth/infrastructure/persistence/schemas/UserSchema.js';
+    export default User;
+    ```
+*   **Worker Model Proxy** [backend/src/models/Worker.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/Worker.js):
+    ```javascript
+    // backend/src/models/Worker.js (Backward Compatibility Proxy)
+    import Worker from '../modules/auth/infrastructure/persistence/schemas/WorkerSchema.js';
+    export default Worker;
+    ```
+*Effect:* Mongoose registers these models globally (e.g. `mongoose.model('User')`), meaning all existing database populated relationships and queries across other modules (Bookings, Chat, Payments, Reviews) function exactly as they did.
+
+### 5.3 Service Helper Proxy
+To support legacy tests (like `bookingStateMachine.test.js`) that import `generateToken` from `src/services/authService.js`, we rewrite [backend/src/services/authService.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/services/authService.js):
+```javascript
+// backend/src/services/authService.js (Backward Compatibility Proxy)
+import JwtTokenService from '../modules/auth/infrastructure/services/JwtTokenService.js';
+
+const tokenService = new JwtTokenService();
+
+export const generateToken = (payload) => {
+  return tokenService.generate(payload);
+};
+```
+
+---
+
+## 6. Verification Plan
+
+### 6.1 Automated Verification
+We will run our Jest tests using:
+```bash
+npm run test:phase2
+```
+This ensures booking state transitions, payments, and users continue to function successfully under the refactored database access layers and proxy model exports.
+
+We will also add a new integration test suite:
+*   [NEW] [cleanAuth.test.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/tests/cleanAuth.test.js) which specifically calls the new Clean Architecture endpoints to verify OTP flow and worker onboarding.
+
+### 6.2 Manual Verification
+We will verify that the server boots up properly and responds to local API requests:
+*   `POST /api/v1/auth/send-otp` (Simulate sending OTP, print to console).
+*   `POST /api/v1/auth/verify-otp` (Verify OTP and return user + token).
+*   `POST /api/v1/auth/register/worker` (Register worker with location, category details).

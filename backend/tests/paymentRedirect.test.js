@@ -69,7 +69,7 @@ describe('Sahayog Sarthi Phase 1 Integration Tests', () => {
       customerId: testCustomer._id,
       workerId: testWorker._id,
       serviceType: 'Electrician',
-      status: 'pending',
+      status: 'completed',
       amount: 300,
       customerAddress: 'Lucknow Sandbox',
       paymentStatus: 'pending'

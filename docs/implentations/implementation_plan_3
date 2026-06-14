@@ -1,0 +1,135 @@
+# Sahayog Sarthi Enterprise Upgrade: Revised Implementation Plan & File-by-File Execution Strategy
+
+This plan incorporates user decisions and details the technical specifications for **Phase 3: Clean Architecture Refactor (Auth Module)**.
+
+---
+
+## Approved Architecture Decisions
+
+1.  **Pages Router Retention:** Maintain `/src/pages` Next.js router.
+2.  **SMS Gateway:** MSG91 as the primary provider with Twilio as fallback.
+3.  **AI Knowledge Base:** Static JSON files (`faq.json`, `policies.json`, `services.json`, `pricing.json`) in `backend/data/`.
+4.  **Security Hardening Phase:** Mandatory Phase 4 checkpoint.
+5.  **Refactoring Pattern:** Clean Architecture modular migration, refactoring **one module at a time** starting with the **Auth Module only**.
+
+---
+
+## Phase 3: Clean Architecture Refactor (Auth Module)
+
+## 1. Existing Structure
+
+Currently, the authentication logic is spread across several unstructured directories:
+*   [backend/src/routes/auth.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/routes/auth.js) (Express Route declarations)
+*   [backend/src/controllers/authController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/authController.js) (Controllers handling HTTP validation and service coordination)
+*   [backend/src/services/authService.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/services/authService.js) (In-memory SMS/OTP generation and token signing)
+*   [backend/src/models/User.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/User.js) (Mongoose User Schema)
+*   [backend/src/models/Worker.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/Worker.js) (Mongoose Worker Schema)
+
+---
+
+## 2. New Clean Architecture Structure
+
+We will refactor and isolate the Auth Module under `backend/src/modules/auth/` using a 4-layered structure:
+
+```text
+backend/src/modules/auth/
+├── domain/                               # 1. Domain Layer (Pure Enterprise Rules)
+│   ├── entities/
+│   │   ├── User.js                       # User Business Entity
+│   │   └── Worker.js                     # Worker Business Entity
+│   └── value-objects/
+│       └── MobileNumber.js               # Enforces valid 10-digit mobile rule
+├── application/                          # 2. Application Layer (Use Cases & Ports)
+│   ├── use-cases/
+│   │   ├── SendOtpUseCase.js             # Logic to generate OTP and dispatch SMS
+│   │   ├── VerifyOtpUseCase.js           # Verifies OTP and generates JWT session token
+│   │   └── RegisterWorkerUseCase.js      # Onboards new Sarthi workers with coordinates
+│   └── ports/                            # Ports for outbound drivers (dependency inversion)
+│       ├── SmsPort.js                    # Interface for SMS clients
+│       └── UserRepositoryPort.js         # Interface for User database queries
+├── interfaces/                           # 3. Interface Adapters Layer (Express Controllers)
+│   ├── controllers/
+│   │   └── AuthController.js             # Receives Express requests, delegates, and returns standard JSON
+│   └── routes/
+│       └── authRoutes.js                 # HTTP routing declarations
+└── infrastructure/                       # 4. Infrastructure Layer (Frameworks & Drivers)
+    ├── database/
+    │   ├── MongooseUserRepository.js     # Implements UserRepositoryPort using Mongoose User Schema
+    │   └── MongooseWorkerRepository.js   # Implements Worker database lookup logic
+    ├── services/
+    │   ├── Msg91SmsService.js            # MSG91 gateway client implementing SmsPort
+    │   └── JwtTokenService.js            # JWT token signer
+    └── persistence/
+        └── schemas/                      # Database Mongoose Schemas
+            ├── UserSchema.js             # Moved from backend/src/models/User.js
+            └── WorkerSchema.js           # Moved from backend/src/models/Worker.js
+```
+
+---
+
+## 3. Files to be Moved or Created
+
+### New Domain files to be Created:
+*   [NEW] [User.js (Domain Entity)](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/domain/entities/User.js): Pure JS class representing a User.
+*   [NEW] [Worker.js (Domain Entity)](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/domain/entities/Worker.js): Pure JS class representing a Worker.
+*   [NEW] [MobileNumber.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/domain/value-objects/MobileNumber.js): Value object validating mobile formats.
+
+### New Application Ports & Use Cases to be Created:
+*   [NEW] [SendOtpUseCase.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/application/use-cases/SendOtpUseCase.js)
+*   [NEW] [VerifyOtpUseCase.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/application/use-cases/VerifyOtpUseCase.js)
+*   [NEW] [RegisterWorkerUseCase.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/application/use-cases/RegisterWorkerUseCase.js)
+*   [NEW] [SmsPort.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/application/ports/SmsPort.js)
+*   [NEW] [UserRepositoryPort.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/application/ports/UserRepositoryPort.js)
+
+### New Infrastructure & Adapters to be Created:
+*   [NEW] [AuthController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/interfaces/controllers/AuthController.js)
+*   [NEW] [authRoutes.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/interfaces/routes/authRoutes.js)
+*   [NEW] [MongooseUserRepository.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/infrastructure/database/MongooseUserRepository.js)
+*   [NEW] [MongooseWorkerRepository.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/infrastructure/database/MongooseWorkerRepository.js)
+*   [NEW] [Msg91SmsService.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/infrastructure/services/Msg91SmsService.js)
+*   [NEW] [JwtTokenService.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/infrastructure/services/JwtTokenService.js)
+
+### Existing Files to be Relocated (Moved):
+*   [backend/src/models/User.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/User.js) ➔ Moves to `backend/src/modules/auth/infrastructure/persistence/schemas/UserSchema.js`
+*   [backend/src/models/Worker.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/Worker.js) ➔ Moves to `backend/src/modules/auth/infrastructure/persistence/schemas/WorkerSchema.js`
+
+---
+
+## 4. Import Changes & Path Maps
+
+| Old Source Path | New target Destination Path | Other Modules Import Adjustments |
+| :--- | :--- | :--- |
+| `src/routes/auth.js` | `src/modules/auth/interfaces/routes/authRoutes.js` | Wrapped by a backward-compatible proxy route file. |
+| `src/controllers/authController.js` | `src/modules/auth/interfaces/controllers/AuthController.js` | Obsoleted. Covered internally by the route adapter. |
+| `src/models/User.js` | `src/modules/auth/infrastructure/persistence/schemas/UserSchema.js` | Wrapped by a backward-compatible model proxy export. |
+| `src/models/Worker.js` | `src/modules/auth/infrastructure/persistence/schemas/WorkerSchema.js` | Wrapped by a backward-compatible model proxy export. |
+
+---
+
+## 5. Backward Compatibility Strategy
+
+To avoid breaking any pre-existing imports or endpoint registrations in other parts of the monorepo (such as booking management, review controllers, or index mounts) we will deploy **Proxy Files** at the old file paths:
+
+### 1. Route Entry Proxy
+We keep [backend/src/routes/auth.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/routes/auth.js) in place, but empty its routing logic and change it to export the new clean router:
+```javascript
+// backend/src/routes/auth.js (Proxy Wrapper)
+import authRoutes from '../modules/auth/interfaces/routes/authRoutes.js';
+export default authRoutes;
+```
+This ensures `index.js` mounts the routing gate cleanly without any modifications.
+
+### 2. Mongoose Model Proxies
+To prevent breaking import statements like `import User from '../models/User.js';` in controllers such as payments or bookings, we keep `backend/src/models/User.js` and `backend/src/models/Worker.js` in place as proxy wrappers:
+```javascript
+// backend/src/models/User.js (Proxy Wrapper)
+import User from '../modules/auth/infrastructure/persistence/schemas/UserSchema.js';
+export default User;
+```
+```javascript
+// backend/src/models/Worker.js (Proxy Wrapper)
+import Worker from '../modules/auth/infrastructure/persistence/schemas/WorkerSchema.js';
+export default Worker;
+```
+
+This guarantees 100% backward compatibility and enables us to refactor other modules incrementally in subsequent phases.
