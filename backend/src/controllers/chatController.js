@@ -6,7 +6,7 @@ import Chat from '../models/Chat.js';
  * Route: GET /api/v1/chats/:bookingId
  */
 export const getChatHistory = async (req, res) => {
-  const { bookingId } = req.params;
+  const bookingId = req.params.bookingId || req.params.id || req.params.bookingId;
 
   try {
     const messages = await Chat.find({ bookingId }).sort({ timestamp: 1 });
