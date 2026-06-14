@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import axios from 'axios';
+import withAuth from '../../components/withAuth.js';
 
-export default function PaymentCheckout() {
+function PaymentCheckout() {
   const router = useRouter();
   const { bookingId, amount } = router.query; // URL patterns se pricing variables parse karega
 
@@ -141,3 +142,5 @@ export default function PaymentCheckout() {
     </div>
   );
 }
+
+export default withAuth(PaymentCheckout, ['customer']);

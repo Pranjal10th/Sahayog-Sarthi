@@ -16,6 +16,26 @@ export default function Home() {
   const [comment, setComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  // Authenticated user context parsing
+  const [currentUser, setCurrentUser] = useState(null);
+  const [userRole, setUserRole] = useState('');
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const token = localStorage.getItem('token');
+        const userStr = localStorage.getItem('user');
+        const roleStr = localStorage.getItem('role');
+        if (token && userStr) {
+          setCurrentUser(JSON.parse(userStr));
+          setUserRole(roleStr || '');
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }, []);
+
   // Trigger modal visibility if tracking redirection brings success parameters
   useEffect(() => {
     if (payment_success === 'true' && booking_id) {
@@ -57,6 +77,61 @@ export default function Home() {
       <Head>
         <title>Sahayog Sarthi | On-Demand Service Cluster</title>
       </Head>
+
+      {/* Dynamic Header Navbar */}
+      <nav className="bg-white border-b border-slate-100 px-6 py-4 flex justify-between items-center shadow-sm">
+        <div className="flex items-center space-x-2 cursor-pointer" onClick={() => router.push('/')}>
+          <span className="text-2xl">🤝</span>
+          <span className="font-black text-slate-900 tracking-tight text-lg">Sahayog Sarthi</span>
+        </div>
+        
+        <div className="flex items-center space-x-4">
+          {currentUser ? (
+            <>
+              <div className="text-right hidden sm:block">
+                <p className="text-xs font-bold text-slate-900">{currentUser.name || 'User'}</p>
+                <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">{userRole}</p>
+              </div>
+              
+              {userRole === 'worker' && (
+                <button 
+                  onClick={() => router.push('/workers/dashboard')}
+                  className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all"
+                >
+                  Sarthi Dashboard
+                </button>
+              )}
+              {userRole === 'admin' && (
+                <button 
+                  onClick={() => router.push('/admin')}
+                  className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all"
+                >
+                  Admin Control Panel
+                </button>
+              )}
+              
+              <button
+                onClick={() => {
+                  localStorage.clear();
+                  setCurrentUser(null);
+                  setUserRole('');
+                  router.push('/auth/login');
+                }}
+                className="bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold px-4 py-2.5 rounded-xl transition-all uppercase tracking-wider"
+              >
+                Logout
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => router.push('/auth/login')}
+              className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-md shadow-blue-600/10 transition-all uppercase tracking-wider"
+            >
+              Login / Register
+            </button>
+          )}
+        </div>
+      </nav>
 
       {/* --- CORE HERO BANNER CONSOLE DISPLAY --- */}
       <div className="bg-blue-600 text-white p-12 text-center space-y-4">

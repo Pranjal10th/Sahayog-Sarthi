@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import axios from 'axios';
+import withAuth from '../../components/withAuth.js';
 
-export default function WorkerDetail() {
+function WorkerDetail() {
   const router = useRouter();
   // URL dynamic segments aur query parameters extract karo
   const { id, amount, category } = router.query; 
@@ -26,9 +27,8 @@ export default function WorkerDetail() {
       setError('');
       setMessage('');
 
-      // localStorage se token uthayega (Agar aapne trick se add kiya hai)
-      // Fallback me jo pichli baar valid token generate hua tha use default string me daal diya hai
-      const authToken = localStorage.getItem('token') || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjZhMmJmOGM5OWZhZjFmZmIxMTkyNDNmMyIsInJvbGUiOiJjdXN0b21lciIsImlhdCI6MTc4MTcwOTAxNywiZXhwIjoxNzgyMzEzMDE3fQ.bXqD_2Wv-5L6m-K8N-kX8P7_fake_token_structure";
+      // Retrieve token from authenticated local storage session
+      const authToken = localStorage.getItem('token');
 
       const payload = {
         workerId: id,
@@ -143,3 +143,5 @@ export default function WorkerDetail() {
     </div>
   );
 }
+
+export default withAuth(WorkerDetail, ['customer']);

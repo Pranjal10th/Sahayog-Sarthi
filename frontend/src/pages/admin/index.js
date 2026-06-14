@@ -2,8 +2,9 @@
 import React, { useState, useEffect } from 'react';
 import Head from 'next/head';
 import axios from 'axios';
+import withAuth from '../../components/withAuth.js';
 
-export default function AdminDashboard() {
+function AdminDashboard() {
   const [metrics, setMetrics] = useState({ totalUsers: 0, activeWorkers: 0, platformRevenue: 0 });
   const [pendingWorkers, setPendingWorkers] = useState([]);
   const [liveBookings, setLiveBookings] = useState([]);
@@ -92,9 +93,20 @@ export default function AdminDashboard() {
             <h1 className="text-3xl font-black tracking-tight text-white">Sahayog Dashboard</h1>
             <p className="text-slate-400 text-xs mt-1">Platform Operations Control Room & Core Infrastructure Gateways</p>
           </div>
-          <span className="bg-red-500/10 text-red-400 border border-red-500/20 px-3 py-1 rounded-md text-xs font-mono font-bold tracking-wider uppercase animate-pulse">
-            Root Terminal Access
-          </span>
+          <div className="flex items-center space-x-3">
+            <span className="bg-red-500/10 text-red-400 border border-red-500/20 px-3 py-1 rounded-md text-xs font-mono font-bold tracking-wider uppercase animate-pulse">
+              Root Terminal Access
+            </span>
+            <button
+              onClick={() => {
+                localStorage.clear();
+                window.location.href = '/auth/login';
+              }}
+              className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all uppercase tracking-wider cursor-pointer"
+            >
+              Logout
+            </button>
+          </div>
         </div>
 
         {msg && (
@@ -224,3 +236,5 @@ export default function AdminDashboard() {
     </div>
   );
 }
+
+export default withAuth(AdminDashboard, ['admin']);

@@ -1,12 +1,26 @@
 // frontend/src/pages/workers/dashboard.js
 import { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
+import withAuth from '../../components/withAuth.js';
 
 let socket;
 
-export default function WorkerDashboard() {
-  // Static Simulation Context for Testing (Baad me login user state se bind hoga)
-  const workerId = "65f8a12b4f9c2d1123456789"; 
+function WorkerDashboard() {
+  // Dynamic Sarthi ID parsed synchronously from local storage context
+  const [workerId, setWorkerId] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const userStr = localStorage.getItem('user');
+        if (userStr) {
+          const parsed = JSON.parse(userStr);
+          return parsed._id || parsed.id || "";
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    return "";
+  });
   
   const [analytics, setAnalytics] = useState({
     walletBalance: 0,
@@ -27,11 +41,12 @@ export default function WorkerDashboard() {
 
   // 1. Fetch Dashboard Analytics & Ledger from Database Node
   const fetchDashboardData = async () => {
+    if (!workerId) return;
     try {
       // Local backend service validation call mapping via token storage or direct bypass
       const res = await fetch(`http://localhost:5000/api/v1/workers/${workerId}/dashboard`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('worker_token')}` // Ensure token is present in staging
+          'Authorization': `Bearer ${localStorage.getItem('token') || localStorage.getItem('worker_token')}` // Ensure token is present in staging
         }
       });
       const data = await res.json();
@@ -49,25 +64,30 @@ export default function WorkerDashboard() {
 
   // 2. Initialize Socket and Stream Sync
   useEffect(() => {
+    if (!workerId) {
+      setLoading(false);
+      return;
+    }
     fetchDashboardData();
     
     socket = io('http://localhost:5000');
     socket.emit('join', { userId: workerId });
 
     return () => {
-      socket.disconnect();
+      if (socket) socket.disconnect();
     };
-  }, []);
+  }, [workerId]);
 
   // 3. Availability Toggle Handler
   const toggleAvailability = async () => {
+    if (!workerId) return;
     const updatedState = !analytics.isAvailable;
     try {
       const res = await fetch(`http://localhost:5000/api/v1/workers/${workerId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('worker_token')}`
+          'Authorization': `Bearer ${localStorage.getItem('token') || localStorage.getItem('worker_token')}`
         },
         body: JSON.stringify({ isAvailable: updatedState })
       });
@@ -133,7 +153,7 @@ export default function WorkerDashboard() {
     });
 
     try {
-      const token = localStorage.getItem('worker_token');
+      const token = localStorage.getItem('token') || localStorage.getItem('worker_token');
       const res = await fetch(`http://localhost:5000/api/v1/workers/${workerId}`, {
         method: 'PUT',
         headers: {
@@ -177,16 +197,28 @@ export default function WorkerDashboard() {
           <p className="text-slate-400 text-sm mt-1">Real-time Service Node Management System</p>
         </div>
 
-        {/* Live Availability Switcher Widget */}
-        <div className="flex items-center gap-3 bg-slate-900/60 backdrop-blur-md p-3 rounded-xl border border-slate-800">
-          <span className={`text-xs font-bold uppercase tracking-wider ${analytics.isAvailable ? 'text-emerald-400' : 'text-rose-500'}`}>
-            {analytics.isAvailable ? '● Duty Online' : '○ Offline'}
-          </span>
-          <button 
-            onClick={toggleAvailability}
-            className={`w-12 h-6 flex items-center rounded-full p-1 transition-all duration-300 ${analytics.isAvailable ? 'bg-emerald-500 justify-end' : 'bg-slate-700 justify-start'}`}
+        {/* Live Availability & Logout Widget Container */}
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 bg-slate-900/60 backdrop-blur-md p-3 rounded-xl border border-slate-800">
+            <span className={`text-xs font-bold uppercase tracking-wider ${analytics.isAvailable ? 'text-emerald-400' : 'text-rose-500'}`}>
+              {analytics.isAvailable ? '● Duty Online' : '○ Offline'}
+            </span>
+            <button 
+              onClick={toggleAvailability}
+              className={`w-12 h-6 flex items-center rounded-full p-1 transition-all duration-300 ${analytics.isAvailable ? 'bg-emerald-500 justify-end' : 'bg-slate-700 justify-start'}`}
+            >
+              <div className="bg-white w-4 h-4 rounded-full shadow-md transform duration-300"></div>
+            </button>
+          </div>
+          
+          <button
+            onClick={() => {
+              localStorage.clear();
+              window.location.href = '/auth/login';
+            }}
+            className="bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 hover:text-white px-4 py-3 rounded-xl text-xs font-bold transition-all uppercase tracking-wider cursor-pointer"
           >
-            <div className="bg-white w-4 h-4 rounded-full shadow-md transform duration-300"></div>
+            Logout
           </button>
         </div>
       </div>
@@ -361,3 +393,5 @@ export default function WorkerDashboard() {
     </div>
   );
 }
+
+export default withAuth(WorkerDashboard, ['worker']);

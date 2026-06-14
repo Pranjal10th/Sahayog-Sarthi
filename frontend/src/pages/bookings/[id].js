@@ -5,6 +5,7 @@ import Head from 'next/head';
 import io from 'socket.io-client';
 import axios from 'axios';
 import dynamic from 'next/dynamic';
+import withAuth from '../../components/withAuth.js';
 
 const MapContainer = dynamic(() => import('react-leaflet').then((mod) => mod.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then((mod) => mod.TileLayer), { ssr: false });
@@ -28,7 +29,7 @@ function ChangeMapView({ center }) {
   return null;
 }
 
-export default function BookingTracker() {
+function BookingTracker() {
   const router = useRouter();
   const { id } = router.query;
   
@@ -42,7 +43,23 @@ export default function BookingTracker() {
   const [messages, setMessages] = useState([]);
   const [typedMessage, setTypedMessage] = useState('');
   const chatEndRef = useRef(null);
-  const currentCustomerId = "6a2c1a295ca7ff1dfef3dbcf"; // Mock sandbox user string
+
+  const [currentUser, setCurrentUser] = useState(null);
+  const [userRole, setUserRole] = useState('');
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const userStr = localStorage.getItem('user');
+        if (userStr) {
+          setCurrentUser(JSON.parse(userStr));
+        }
+        setUserRole(localStorage.getItem('role') || '');
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }, []);
 
   // Scroll chats down automatically on incoming broadcast tokens
   const scrollToBottom = () => {
@@ -124,10 +141,13 @@ export default function BookingTracker() {
     e.preventDefault();
     if (!typedMessage.trim()) return;
 
+    const senderId = currentUser?._id || currentUser?.id;
+    const senderModel = userRole === 'worker' ? 'Worker' : 'User';
+
     socket.emit('chat:message', {
       bookingId: id,
-      senderId: currentCustomerId,
-      senderModel: 'User',
+      senderId,
+      senderModel,
       message: typedMessage
     });
     setTypedMessage('');
@@ -218,3 +238,5 @@ export default function BookingTracker() {
     </div>
   );
 }
+
+export default withAuth(BookingTracker, ['customer', 'worker']);
