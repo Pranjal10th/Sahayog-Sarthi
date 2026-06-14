@@ -1,0 +1,107 @@
+# Phase 3.6A: Legacy Code Cleanup & Deletion Plan
+
+This plan outlines Phase 3.6A, focusing solely on the cleanup and deletion of legacy Express routes, controllers, and services that are no longer serving live traffic or imported by active system nodes. 
+
+All proxy model wrappers in `src/models/` remain active and untouched in this phase.
+
+---
+
+## 1. Deletion Matrix
+
+The following matrix lists every candidate file proposed for deletion in Phase 3.6A, detailing its path, referencing files, and evidence proving it can be safely removed.
+
+| File Path | Category | Referencing Files | Deletion Evidence & Justification |
+| :--- | :--- | :--- | :--- |
+| `src/routes/auth.js` | Route | None | **0 active references**. This was a route compatibility wrapper not imported or registered by the consolidated Express router in `index.js`. |
+| `src/routes/booking.js` | Route | None | **0 active references**. Express routes are fully Swapped to clean `bookingRoutes.js` in `index.js`. |
+| `src/routes/payment.js` | Route | None | **0 active references**. Express routes are fully Swapped to clean `paymentRoutes.js` in `index.js`. |
+| `src/routes/review.js` | Route | None | **0 active references**. Express routes are fully Swapped to clean `reviewRoutes.js` in `index.js`. |
+| `src/routes/worker.js` | Route | None | **0 active references**. Express routes are fully Swapped to clean `workerRoutes.js` in `index.js`. |
+| `src/controllers/authController.js` | Controller | None | **0 active references**. All incoming auth requests are handled by clean `AuthController.js`. |
+| `src/controllers/bookingController.js` | Controller | None | **0 active references**. All incoming booking requests are handled by clean `BookingController.js`. |
+| `src/controllers/chatController.js` | Controller | None | **0 active references**. All incoming chat requests are handled by clean `ChatController.js`. |
+| `src/controllers/paymentController.js` | Controller | None | **0 active references**. All incoming payment requests are handled by clean `PaymentController.js`. |
+| `src/controllers/review.js` | Controller | None | **0 active references**. All incoming review requests are handled by clean `ReviewController.js`. |
+| `src/controllers/workerController.js` | Controller | None | **0 active references**. The final reference `/admin/overview` was migrated in Phase 3.5.1 to clean `WorkerController.js`. |
+| `src/services/authService.js` | Service | None | **0 active references**. Only imported by legacy `authController.js`. Not used by active code. |
+| `src/services/locationService.js` | Service | None | **0 active references**. Only imported by legacy `workerController.js`. Not used by active code. |
+
+---
+
+## 2. Deletion-Grade Search Audit Logs
+
+The following exact grep audit verifies that references to candidate files are only found within themselves or other dead code.
+
+### A. Legacy Controllers Search Audit
+- **`authController`**: 0 references.
+- **`bookingController`**: 1 import reference in legacy `src/routes/booking.js` (dead route). 1 mention in comments within `MongoBookingRepository.js`.
+- **`chatController`**: 1 import reference in legacy `src/routes/booking.js` (dead route).
+- **`paymentController`**: 1 import reference in legacy `src/routes/payment.js` (dead route). 1 mention in comments within `MongoPaymentRepository.js`.
+- **`workerController`**: 1 import reference in legacy `src/routes/worker.js` (dead route).
+- **`src/controllers/review.js`**: 1 import reference in legacy `src/routes/review.js` (dead route).
+
+### B. Legacy Routes Search Audit
+- **`routes/auth`**: 0 active imports (only referenced inside `src/routes/auth.js` self-wrapper).
+- **`routes/booking`**: 0 active imports (only referenced inside `bookingRoutes.js` comments).
+- **`routes/payment`**: 0 active imports.
+- **`routes/review`**: 0 active imports.
+- **`routes/worker`**: 0 active imports.
+
+### C. Legacy Services Search Audit
+- **`authService`**: 0 active imports (only referenced inside `authController.js` which is dead code).
+- **`locationService`**: 0 active imports (only referenced inside `workerController.js` which is dead code).
+
+---
+
+## 3. Retained Proxy Model Wrappers (Strict Audit Requirement)
+
+The following files are **not** proposed for deletion and remain active:
+- `src/models/User.js`
+- `src/models/Worker.js`
+- `src/models/Booking.js`
+- `src/models/Payment.js`
+- `src/models/Review.js`
+- `src/models/Chat.js`
+
+These models are actively referenced by:
+- Clean module persistence files (e.g. `MongoUserRepository.js`, `MongoBookingRepository.js`, `MongoPaymentRepository.js`, `MongoWorkerRepository.js`).
+- Active operational services (`telegramService.js`, `socketService.js`, `reminderService.js`).
+
+---
+
+## 4. Execution Plan (Phase 3.6A vs Phase 3.6B)
+
+```mermaid
+graph TD
+  A["Phase 3.5.1 Stable Tag"] --> B["Phase 3.6A: Legacy Routes/Controllers/Services Cleanup"]
+  B --> C["Verify with scratch/adminOverviewVerification.js & npm run test"]
+  C --> D["Commit & Tag: phase3-6a-stable"]
+  D --> E["Phase 3.6B (Future): Proxy Model Wrapper Cleanup & Import Refactoring"]
+```
+
+### Phase 3.6A (Current Phase)
+1. **Scope**: Permanent deletion of the 13 unreferenced legacy files list.
+2. **Implementation Strategy**: Perform physical file deletion via project command-line tools.
+3. **Verification Strategy**:
+   - Run `node scratch/adminOverviewVerification.js` to verify endpoint parity.
+   - Run `npm run test` to check for compilation or runtime suite errors.
+4. **Rollback Strategy**:
+   ```bash
+   git reset --hard phase3-5-1-stable
+   git clean -fd
+   ```
+
+### Phase 3.6B (Future Phase)
+1. **Scope**: Removal of the 6 proxy files in `src/models/` and refactoring of all repository and active service imports to point directly to the clean schema directories under clean modules.
+2. **Rollback Strategy**: hard reset to `phase3-6a-stable` tag.
+
+---
+
+## 5. Verification Checklist
+
+- [ ] Delete 13 dead code files.
+- [ ] Run `node scratch/adminOverviewVerification.js` (ensure success/match).
+- [ ] Run `npm run test` (confirm all 23 tests pass cleanly).
+- [ ] Commit changes.
+- [ ] Push changes to remote origin.
+- [ ] Tag the codebase as `phase3-6a-stable` and push the tag to origin.

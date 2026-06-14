@@ -1,0 +1,88 @@
+# Phase 3.6: Architecture Cleanup and Deletion Plan
+
+This phase proposes the permanent removal of all verified dead code (legacy controllers, legacy routes, and legacy services) and the refactoring of clean repositories to import clean schemas directly, eliminating backward-compatibility proxy wrappers.
+
+---
+
+## 1. Scope & Affected Files
+
+### Legacy File Deletions (Dead Code)
+The following 13 files are no longer mapped to live traffic or referenced by active module code and will be permanently deleted:
+
+- **Controllers**
+  - **[DELETE]** [authController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/authController.js)
+  - **[DELETE]** [bookingController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/bookingController.js)
+  - **[DELETE]** [chatController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/chatController.js)
+  - **[DELETE]** [paymentController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/paymentController.js)
+  - **[DELETE]** [review.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/review.js)
+  - **[DELETE]** [workerController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/workerController.js)
+
+- **Routes**
+  - **[DELETE]** [auth.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/routes/auth.js)
+  - **[DELETE]** [booking.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/routes/booking.js)
+  - **[DELETE]** [payment.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/routes/payment.js)
+  - **[DELETE]** [review.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/routes/review.js)
+  - **[DELETE]** [worker.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/routes/worker.js)
+
+- **Services**
+  - **[DELETE]** [authService.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/services/authService.js)
+  - **[DELETE]** [locationService.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/services/locationService.js)
+
+---
+
+### Proxy Model Wrapper Removal & Import Refactoring
+To eliminate the proxy files in `src/models/`, we will refactor all imports in the clean modules to reference the clean schema files directly. Once refactored, the proxy files will be permanently deleted:
+
+- **[DELETE]** [User.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/User.js)
+- **[DELETE]** [Worker.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/Worker.js)
+- **[DELETE]** [Booking.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/Booking.js)
+- **[DELETE]** [Payment.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/Payment.js)
+- **[DELETE]** [Review.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/Review.js)
+- **[DELETE]** [Chat.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/Chat.js)
+
+#### Refactoring Mappings:
+- **`MongoUserRepository.js`**
+  - Change: `import User from '../../../../../models/User.js';`
+  - To: `import User from '../../../../auth/infrastructure/persistence/schemas/UserSchema.js';`
+- **`MongoPaymentRepository.js`**
+  - Change: `import Payment from '../../../../../models/Payment.js';` ➔ `import Payment from '../../../../payment/infrastructure/persistence/schemas/PaymentSchema.js';`
+  - Change: `import Booking from '../../../../../models/Booking.js';` ➔ `import Booking from '../../../../booking/infrastructure/persistence/schemas/BookingSchema.js';`
+- **`MongoBookingRepository.js`**
+  - Change: `import Booking from '../../../../../models/Booking.js';`
+  - To: `import Booking from '../../../infrastructure/persistence/schemas/BookingSchema.js';`
+- **`AcceptBookingUseCase.js`**
+  - Change: `import Worker from '../../../../models/Worker.js';`
+  - To: `import Worker from '../../../worker/infrastructure/persistence/schemas/WorkerSchema.js';`
+- **`MongoWorkerRepository.js`** (in `src/modules/auth`)
+  - Change: `import Worker from '../../../../../models/Worker.js';`
+  - To: `import Worker from '../../../../worker/infrastructure/persistence/schemas/WorkerSchema.js';`
+
+---
+
+## 2. Risk Assessment
+
+- **Implicit References to Models**: There is a small risk that third-party testing scripts or unmonitored scripts depend on `/src/models/XYZ.js`.
+  - *Mitigation*: We will perform a final grep search across the entire codebase (including the frontend and all test files) for references to `models/` before deleting the proxy wrappers.
+- **Dependency Issues in Active Services**: The runtime services (`telegramService.js`, `socketService.js`, `reminderService.js`) do not import legacy files. They are wired to clean use cases and schema containers.
+
+---
+
+## 3. Rollback Strategy
+
+Before implementing Phase 3.6, a baseline git commit will be tagged. If any integration issues arise:
+```bash
+git reset --hard phase3-5-1-stable
+git clean -fd
+```
+This will restore all deleted legacy routes, controllers, services, and proxy models, reverting all refactored imports back to their baseline states.
+
+---
+
+## 4. Verification Checklist
+
+1. **Grep Check**: Confirm that no active file in `backend/src` contains any imports of:
+   - `src/controllers/...`
+   - `src/routes/...`
+   - `src/models/...` (excluding test fixtures if preferred, though tests will also be refactored)
+2. **Smoke Test Run**: Run `node scratch/adminOverviewVerification.js` to ensure the newly refactored repositories return data matching the expected shapes.
+3. **Automated Integration Tests**: Execute `npm run test` to verify `23 passed, 23 total` tests.

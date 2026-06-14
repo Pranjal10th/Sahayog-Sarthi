@@ -1,0 +1,168 @@
+# Phase 3.5.1: Worker Completion Plan
+
+This phase migrates the final route dependency on the legacy `workerController.js` (`GET /api/v1/workers/admin/overview`) to the Clean Architecture worker module structure. It implements a clean domain use case and appropriate persistence repositories to calculate active/pending workers, total users, platform revenue, and live bookings, maintaining strict backward compatibility.
+
+## User Review Required
+
+> [!IMPORTANT]
+> **No Legacy Deletions**: In accordance with the Phase 3.5 guidelines, no legacy files will be deleted or removed. The legacy controller `workerController.js` and routes file `worker.js` will remain intact as rollback fallbacks.
+> **No Middleware / Service Modifications**: The `authMiddleware.js`, `validationMiddleware.js`, `reminderService.js`, `telegramService.js`, and `socketService.js` files will not be modified.
+
+## Affected Files
+
+The following files will be created or modified:
+
+### New Files
+- **[NEW]** [GetAdminOverviewUseCase.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/worker/application/use-cases/GetAdminOverviewUseCase.js) - Encapsulates the domain orchestration of gathering admin dashboard metrics.
+- **[NEW]** [MongoUserRepository.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/worker/infrastructure/persistence/repositories/MongoUserRepository.js) - Minimal user persistence reader for count calculations.
+
+### Modified Files
+- **[MODIFY]** [MongoBookingRepository.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/worker/infrastructure/persistence/repositories/MongoBookingRepository.js) - Implement `findLiveBookings()` to query active state transactions.
+- **[MODIFY]** [MongoPaymentRepository.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/worker/infrastructure/persistence/repositories/MongoPaymentRepository.js) - Implement `findPaidPayments()` to query and calculate platform split commission.
+- **[MODIFY]** [container.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/worker/infrastructure/di/container.js) - Register `MongoUserRepository` and wire `GetAdminOverviewUseCase`.
+- **[MODIFY]** [WorkerController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/worker/interfaces/http/controllers/WorkerController.js) - Map route request to the injected `GetAdminOverviewUseCase` output.
+- **[MODIFY]** [workerRoutes.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/worker/interfaces/http/routes/workerRoutes.js) - Replace the legacy controller import with the new clean controller method.
+
+---
+
+## Implementation Strategy
+
+### 1. Persistence Layer Updates
+
+#### `MongoUserRepository.js`
+- Create a read-only MongoDB repository wrapper for the `User` model:
+  ```javascript
+  import User from '../../../../../models/User.js';
+
+  export default class MongoUserRepository {
+    async countDocuments(filters = {}) {
+      return await User.countDocuments(filters);
+    }
+  }
+  ```
+
+#### `MongoBookingRepository.js`
+- Add a helper to retrieve active live bookings:
+  ```javascript
+  async findLiveBookings() {
+    return await Booking.find({
+      status: { $in: ['pending', 'accepted', 'in_progress'] }
+    }).sort({ createdAt: -1 });
+  }
+  ```
+
+#### `MongoPaymentRepository.js`
+- Add a helper to retrieve paid payments:
+  ```javascript
+  async findPaidPayments() {
+    return await Payment.find({ status: 'paid' });
+  }
+  ```
+
+### 2. Application Logic Layer (Use Cases)
+
+#### `GetAdminOverviewUseCase.js`
+- Create a clean orchestration class mapping data queries to respective repositories and calculating the 15% platform split commission:
+  ```javascript
+  export default class GetAdminOverviewUseCase {
+    constructor(workerRepository, bookingRepository, paymentRepository, userRepository) {
+      this.workerRepository = workerRepository;
+      this.bookingRepository = bookingRepository;
+      this.paymentRepository = paymentRepository;
+      this.userRepository = userRepository;
+    }
+
+    async execute() {
+      const totalUsers = await this.userRepository.countDocuments({});
+      const activeWorkers = await this.workerRepository.countDocuments({ kycStatus: 'approved', isAvailable: true });
+      const paymentsPaid = await this.paymentRepository.findPaidPayments();
+      const platformRevenue = paymentsPaid.reduce((sum, current) => sum + (current.amount * 0.15), 0);
+      const pendingWorkers = await this.workerRepository.findWithFilters({ kycStatus: 'pending' });
+      const liveBookings = await this.bookingRepository.findLiveBookings();
+
+      return {
+        metrics: {
+          totalUsers,
+          activeWorkers,
+          platformRevenue: parseFloat(platformRevenue.toFixed(2))
+        },
+        pendingWorkers,
+        liveBookings
+      };
+    }
+  }
+  ```
+
+### 3. Controller and Route Wiring
+
+#### `container.js`
+- Wire dependencies and instantiate the use case:
+  ```javascript
+  import MongoUserRepository from '../persistence/repositories/MongoUserRepository.js';
+  import GetAdminOverviewUseCase from '../../application/use-cases/GetAdminOverviewUseCase.js';
+
+  const userRepository = new MongoUserRepository();
+  export const getAdminOverviewUseCase = new GetAdminOverviewUseCase(
+    workerRepository,
+    bookingRepository,
+    paymentRepository,
+    userRepository
+  );
+  ```
+
+#### `WorkerController.js`
+- Add the `getAdminOverview` handler method:
+  ```javascript
+  import { ..., getAdminOverviewUseCase } from '../../../infrastructure/di/container.js';
+
+  export const getAdminOverview = async (req, res) => {
+    try {
+      const data = await getAdminOverviewUseCase.execute();
+      return res.status(200).json({
+        success: true,
+        ...data
+      });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  };
+  ```
+
+#### `workerRoutes.js`
+- Clean up imports and swap the endpoint:
+  ```javascript
+  // REMOVE: import { getAdminOverviewHub } from '../../../../../controllers/workerController.js';
+  // ADD: getAdminOverview to imports from '../controllers/WorkerController.js';
+  
+  router.get('/admin/overview', protect, getAdminOverview);
+  ```
+
+---
+
+## Verification Strategy
+
+### 1. Automated Tests
+Run the entire backend test suite to ensure that route swapping and logic consolidation don't break existing specs:
+```bash
+npm run test
+```
+Confirm test suite outputs `23 passed, 23 total`.
+
+### 2. Manual Smoke Verification
+Use the existing test scripts to hit the endpoint via mock tokens:
+```bash
+node tests/paymentRedirect.test.js
+```
+Specifically, ensure the administrative overview endpoint returns:
+- Status `200`
+- JSON payload containing `{ success: true, metrics: { totalUsers, activeWorkers, platformRevenue }, pendingWorkers, liveBookings }`.
+
+---
+
+## Rollback Plan
+
+To revert Phase 3.5.1 and redirect the admin overview route back to the legacy controller:
+```bash
+git restore backend/src/modules/worker/interfaces/http/routes/workerRoutes.js
+```
+This restores the legacy controller import and route mapping. All newly added files can be left as-is on disk as they are not referenced elsewhere.

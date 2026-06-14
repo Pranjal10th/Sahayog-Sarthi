@@ -1,0 +1,117 @@
+# Phase 3.5: Clean Architecture Consolidation Plan
+
+This phase consolidates the backend codebase by swapping live traffic to the newly created clean architecture modules, cleaning up runtime service dependencies (Telegram Bot and Sockets), and deleting obsolete legacy controllers, routes, and services.
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Complete Legacy Deletion**: This plan deletes **13 obsolete legacy files** (5 routes, 6 controllers, and 2 services) that are now fully migrated to the Clean Architecture modules.
+> **Zero Production Logic Modifications**: This phase does not introduce new features or change state machine transitions; it is strictly a structural routing and dependency consolidation phase.
+
+## Proposed Changes
+
+---
+
+### 1. Route Registration Swap
+
+We will rewire the Express app inside `index.js` and update tests to consume clean routes directly.
+
+#### [MODIFY] [index.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/index.js)
+- Swap route imports from legacy routes to clean module routes:
+  - `/api/v1/auth` ➔ [authRoutes.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/interfaces/http/routes/authRoutes.js)
+  - `/api/v1/workers` ➔ [workerRoutes.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/worker/interfaces/http/routes/workerRoutes.js)
+  - `/api/v1/bookings` ➔ [bookingRoutes.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/booking/interfaces/http/routes/bookingRoutes.js)
+  - `/api/v1/payments` ➔ [paymentRoutes.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/payment/interfaces/http/routes/paymentRoutes.js)
+  - `/api/v1/reviews` ➔ [reviewRoutes.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/review/interfaces/http/routes/reviewRoutes.js)
+- Mount the new `/api/v1/chats` endpoint routed to [chatRoutes.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/chat/interfaces/http/routes/chatRoutes.js) for clean client access.
+
+#### [MODIFY] [bookingRoutes.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/booking/interfaces/http/routes/bookingRoutes.js)
+- Update legacy chat history route import:
+  - From legacy `chatController.js` to clean `ChatController.js` located at [ChatController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/chat/interfaces/http/controllers/ChatController.js).
+
+---
+
+### 2. Runtime Services Consolidation
+
+To resolve circular dependencies cleanly under Clean Architecture, runtime utilities will consume use cases dynamically.
+
+#### [MODIFY] [telegramService.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/services/telegramService.js)
+- Replace direct `Booking` document updates and inline socket broadcasts inside `callback_query` query handler with a dynamic import of `acceptBookingUseCase` from the booking module container.
+- This automatically executes state transitions, validation checks, clears reminder timers, and dispatches real-time socket events natively.
+
+#### [MODIFY] [socketService.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/services/socketService.js)
+- Replace direct Mongoose query `Chat.create()` inside `chat:message` event with a dynamic import and invocation of `persistChatMessageUseCase` from the chat module container.
+
+---
+
+### 3. Test Alignment
+
+#### [MODIFY] [bookingStateMachine.test.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/tests/bookingStateMachine.test.js)
+- Update route module imports to clean architecture equivalents.
+- Replace legacy `generateToken` import with `globalTokenService.generate` from [container.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/infrastructure/di/container.js).
+
+#### [MODIFY] [paymentRedirect.test.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/tests/paymentRedirect.test.js)
+- Update route module imports to clean architecture equivalents.
+- Replace legacy `generateToken` import with `globalTokenService.generate`.
+
+---
+
+### 4. Legacy Code Removal
+
+The following files will become unused and will be permanently deleted:
+
+#### [DELETE] [auth.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/routes/auth.js)
+#### [DELETE] [booking.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/routes/booking.js)
+#### [DELETE] [payment.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/routes/payment.js)
+#### [DELETE] [review.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/routes/review.js)
+#### [DELETE] [worker.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/routes/worker.js)
+#### [DELETE] [authController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/authController.js)
+#### [DELETE] [bookingController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/bookingController.js)
+#### [DELETE] [chatController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/chatController.js)
+#### [DELETE] [paymentController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/paymentController.js)
+#### [DELETE] [review.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/review.js)
+#### [DELETE] [workerController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/workerController.js)
+#### [DELETE] [authService.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/services/authService.js)
+#### [DELETE] [locationService.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/services/locationService.js)
+
+---
+
+## Migration Order
+
+1. **Step 1**: Refactor [telegramService.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/services/telegramService.js) and [socketService.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/services/socketService.js) to consume use cases dynamically.
+2. **Step 2**: Update [bookingRoutes.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/booking/interfaces/http/routes/bookingRoutes.js) to import from clean ChatController.
+3. **Step 3**: Rewrite route mounts inside [index.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/index.js) to swap routes to clean modules.
+4. **Step 4**: Run full backend test suite to check for any local runtime compilation or route registration errors.
+5. **Step 5**: Update route/service imports inside test files [bookingStateMachine.test.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/tests/bookingStateMachine.test.js) and [paymentRedirect.test.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/tests/paymentRedirect.test.js).
+6. **Step 6**: Run automated tests again to confirm 23/23 tests pass cleanly.
+7. **Step 7**: Delete all legacy routes, controllers, and services listed in the deletion plan.
+8. **Step 8**: Run final verification tests and live server smoke tests.
+
+## Risk Assessment
+
+- **Circular Dependency Crash**: Dynamically importing the booking container inside `telegramService.js` callback execution flow mitigates the circular dependency route during early ES module registration.
+- **Test App Route Mismatch**: Solved by updating test router setup to mirror `index.js` route swaps.
+
+## Rollback Strategy
+- Discard changes using `git restore .` and restore files from the `phase3-4-stable` tag.
+
+## Verification Plan
+
+### Automated Tests
+- Run full test suite:
+  ```bash
+  npm run test
+  ```
+  Ensure Test count is exactly `23 passed, 23 total`.
+
+### Manual / Smoke Tests
+- Run live endpoint verify script:
+  ```bash
+  node scratch/phase33RealVerification.js
+  ```
+  Ensures real state transitions and payment settlements work flawlessly against the unified server.
+- Run live chat verification:
+  ```bash
+  node scratch/verifyChatProxy.js
+  ```
+  Ensures socket-based messages persist correctly and retrieve via clean endpoints.

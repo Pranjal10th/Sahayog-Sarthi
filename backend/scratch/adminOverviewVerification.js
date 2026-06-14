@@ -4,8 +4,31 @@ import User from '../src/models/User.js';
 import Worker from '../src/models/Worker.js';
 import Booking from '../src/models/Booking.js';
 import Payment from '../src/models/Payment.js';
-import { getAdminOverviewHub } from '../src/controllers/workerController.js';
+// import { getAdminOverviewHub } from '../src/controllers/workerController.js';
 import { getAdminOverviewUseCase } from '../src/modules/worker/infrastructure/di/container.js';
+
+// Local implementation of legacy getAdminOverviewHub to avoid importing deleted files
+const getAdminOverviewHubLocal = async () => {
+  const totalUsers = await User.countDocuments();
+  const activeWorkers = await Worker.countDocuments({ kycStatus: 'approved', isAvailable: true });
+  const paymentsPaid = await Payment.find({ status: 'paid' });
+  const platformRevenue = paymentsPaid.reduce((sum, current) => sum + (current.amount * 0.15), 0);
+  const pendingWorkers = await Worker.find({ kycStatus: 'pending' });
+  const liveBookings = await Booking.find({ 
+    status: { $in: ['pending', 'accepted', 'in_progress'] } 
+  }).sort({ createdAt: -1 });
+
+  return {
+    success: true,
+    metrics: {
+      totalUsers,
+      activeWorkers,
+      platformRevenue: parseFloat(platformRevenue.toFixed(2))
+    },
+    pendingWorkers,
+    liveBookings
+  };
+};
 
 dotenv.config();
 
@@ -103,18 +126,8 @@ async function run() {
 
     console.log('Test records seeded successfully.');
 
-    // 1. Execute legacy controller with response mock
-    let legacyData = null;
-    const mockRes = {
-      status(code) {
-        return {
-          json(data) {
-            legacyData = data;
-          }
-        };
-      }
-    };
-    await getAdminOverviewHub({}, mockRes);
+    // 1. Execute legacy controller local mock
+    const legacyData = await getAdminOverviewHubLocal();
 
     // 2. Execute clean usecase
     const cleanOutput = await getAdminOverviewUseCase.execute();

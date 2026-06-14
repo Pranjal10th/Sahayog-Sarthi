@@ -5,7 +5,8 @@ import Booking from '../src/models/Booking.js';
 import Worker from '../src/models/Worker.js';
 import Payment from '../src/models/Payment.js';
 import User from '../src/models/User.js';
-import { generateToken } from '../src/services/authService.js';
+import { globalTokenService } from '../src/modules/auth/infrastructure/di/container.js';
+const generateToken = (payload) => globalTokenService.generate(payload);
 
 // Setup basic Express app matching index.js for test router target
 import authRoutes from '../src/modules/auth/interfaces/http/routes/authRoutes.js';
