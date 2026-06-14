@@ -29,9 +29,6 @@ export default class VerifyOtpUseCase {
       return { success: false, status: 401, message: 'Invalid OTP code.' };
     }
 
-    // OTP matches, invalidate OTP after first use
-    await this.otpStore.delete(mobile.value);
-
     // Find User
     let user = await this.userRepository.findByMobile(mobile.value);
     if (!user) {
@@ -40,6 +37,9 @@ export default class VerifyOtpUseCase {
       }
       user = await this.userRepository.create({ name, mobile: mobile.value });
     }
+
+    // OTP matches, invalidate OTP after successful login or profile creation
+    await this.otpStore.delete(mobile.value);
 
     // Generate Token
     const token = this.tokenService.generate({ id: user.id, role: 'customer' });

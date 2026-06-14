@@ -100,9 +100,9 @@ describe('Clean Architecture Auth Module Integration Tests (Phase 3.1)', () => {
       expect(res.body.newCustomer).toBe(true);
       expect(res.body.message).toBe('OTP verified. Profile creation required.');
 
-      // In-memory OTP store should be cleared
+      // In-memory OTP store should NOT be cleared yet for newCustomer registration
       const recordAfter = await globalOtpStore.get(mobile);
-      expect(recordAfter).toBeUndefined();
+      expect(recordAfter).toBeDefined();
     });
 
     it('should register and return token + customer if OTP is verified, user does not exist, and name is provided', async () => {

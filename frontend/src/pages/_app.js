@@ -19,11 +19,14 @@ if (typeof window !== 'undefined') {
     (response) => response,
     (error) => {
       if (error.response && error.response.status === 401) {
-        console.warn("🔒 Session expired or unauthorized (401). Clearing auth storage...");
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        localStorage.removeItem('role');
-        window.location.href = '/auth/login?expired=true';
+        const token = localStorage.getItem('token');
+        if (token) {
+          console.warn("🔒 Session expired or unauthorized (401). Clearing auth storage...");
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          localStorage.removeItem('role');
+          window.location.href = '/auth/login?expired=true';
+        }
       }
       return Promise.reject(error);
     }
