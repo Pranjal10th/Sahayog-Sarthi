@@ -1,0 +1,32 @@
+[
+  {
+    "category": "Cancellation & Refund",
+    "policy_name": "Booking Cancellation Rules",
+    "details": "Agar worker ne booking accept nahi ki hai, toh customer free cancellation kar sakta hai. Worker dwara booking accept karne ke baad agar customer cancel karta hai, toh ek minimal cancellation fee lag sakti hai. Agar worker spot par nahi pahunchta, toh customer bina kisi fee ke cancel kar sakta hai."
+  },
+  {
+    "category": "Cancellation & Refund",
+    "policy_name": "Refund Policy",
+    "details": "Agar customer ne prepayment kiya hai aur worker nahi aata ya service fail ho jaati hai, toh 100% refund direct source account me 5-7 working days me process kiya jayega. Service start hone ke baad payment refund case-by-case basis par admin team evaluate karegi."
+  },
+  {
+    "category": "Safety & Security",
+    "policy_name": "Worker Verification (KYC)",
+    "details": "Platform par registered sabhi workers (Sarthis) verified hote hain. KYC documentation ke antargat Aadhar Card, PAN Card, aur Police Verification (charitra praman patra) check kiya jata hai. Admin approval ke baad hi worker live ja sakta hai."
+  },
+  {
+    "category": "Safety & Security",
+    "policy_name": "Emergency & Safety Protocol",
+    "details": "Emergency ya asuraksha ke samay, app me emergency contact options hain. Sarthi aur customer dono ko platform par misbehavior se bachna chahiye. Kisi bhi physical conflict ya cheating ke case me account ko instantly block kiya jayega."
+  },
+  {
+    "category": "Code of Conduct",
+    "policy_name": "Worker Professionalism",
+    "details": "Worker ko booking accept karne ke baad same time par pahunchkar kaam start karna hoga. Worker directly cash mangne ya platform se bahar personal contract karne se parhez karein. Aisa karne par account block kiya ja sakta hai."
+  },
+  {
+    "category": "Payments",
+    "policy_name": "Payment Disputes",
+    "details": "Kaam complete hone par payment online link (Razorpay) dwara kiya jana chahiye. Agar amount ya kaam ko lekar koi vivad hota hai, toh kaam ka progress photo upload kar support ticket generate kiya ja sakta hai. Dispute resolution hone tak worker payout hold par rakha ja sakta hai."
+  }
+]

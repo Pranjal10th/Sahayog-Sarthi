@@ -10,10 +10,13 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [msg, setMsg] = useState('');
+  const [error, setError] = useState('');
 
   // 1. Core Data Hub Synchronization over Live API Gateway
   const fetchAdminDataHub = async () => {
     try {
+      setLoading(true);
+      setError('');
       const token = localStorage.getItem('token') || '';
       const response = await axios.get('http://localhost:5000/api/v1/workers/admin/overview', {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -25,17 +28,8 @@ export default function AdminDashboard() {
         setLiveBookings(response.data.liveBookings);
       }
     } catch (err) {
-      console.warn("⚠️ API Gateway offline. Loading Sandbox local mock metrics matrix templates...");
-      
-      // Dynamic local fallback fail-safes for staging evaluation logs
-      setPendingWorkers([
-        { _id: "6a2bf8c99faf1ffb119243f3", name: "Ramesh Carpenter", serviceCategory: "Carpenter", experience: 6, hourlyRate: 250, mobile: "9111222333", kycStatus: "pending" },
-        { _id: "6a2c06e35ca7ff1dfef3dbce", name: "Suresh Plumber", serviceCategory: "Plumber", experience: 4, hourlyRate: 200, mobile: "9222333444", kycStatus: "pending" }
-      ]);
-      setLiveBookings([
-        { _id: "6a2c1a295ca7ff1dfef3dbcf", serviceType: "Plumber", amount: 200, customerAddress: "101, Tiwari Ganj, Lucknow", paymentStatus: "paid", status: "pending" }
-      ]);
-      setMetrics({ totalUsers: 142, activeWorkers: 38, platformRevenue: 4850 });
+      console.error("❌ Failed to fetch admin overview metrics:", err);
+      setError(err.response?.data?.error || 'Failed to sync platform metrics from API gateway.');
     } finally {
       setLoading(false);
     }
@@ -50,6 +44,7 @@ export default function AdminDashboard() {
     try {
       setActionLoading(true);
       setMsg('');
+      setError('');
       const token = localStorage.getItem('token') || '';
       
       // Dynamic target mapping parameter route: /api/v1/workers/:id/:action
@@ -69,9 +64,8 @@ export default function AdminDashboard() {
         }
       }
     } catch (err) {
-      // Sandbox testing verification fallback bypass trigger
-      setMsg(`⚠️ Local Matrix: Status update simulated successfully over target buffer schema.`);
-      setPendingWorkers(prev => prev.filter(w => w._id !== workerId));
+      console.error("❌ KYC status update failed:", err);
+      setError(err.response?.data?.error || 'Could not update worker KYC status.');
     } finally {
       setActionLoading(false);
     }
@@ -106,6 +100,12 @@ export default function AdminDashboard() {
         {msg && (
           <div className="bg-blue-500/10 text-blue-400 border border-blue-500/20 p-4 rounded-xl text-sm font-medium">
             {msg}
+          </div>
+        )}
+
+        {error && (
+          <div className="bg-red-500/10 text-red-400 border border-red-500/20 p-4 rounded-xl text-sm font-medium">
+            ❌ {error}
           </div>
         )}
 

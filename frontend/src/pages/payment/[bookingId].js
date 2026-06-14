@@ -63,7 +63,7 @@ export default function PaymentCheckout() {
         // Payment success hote hi worker wallet instantly top-up ho chuka hoga
         // Hum user ko dynamic review/rating dashboard modal par redirect karenge
         setTimeout(() => {
-          router.push(`/?payment=success&bookingId=${bookingId}`);
+          router.push(`/?payment_success=true&booking_id=${bookingId}`);
         }, 2500);
       }
     } catch (err) {

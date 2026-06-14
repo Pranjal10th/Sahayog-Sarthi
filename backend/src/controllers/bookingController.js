@@ -133,3 +133,105 @@ export const completeBooking = async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 };
+
+// 4. Get Booking By ID (Internal/External sync)
+export const getBookingById = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const booking = await Booking.findById(id)
+      .populate('customerId', 'name mobile profileImage')
+      .populate('workerId', 'name mobile serviceCategory rating location');
+    if (!booking) {
+      return res.status(404).json({ success: false, error: 'Booking not found.' });
+    }
+    return res.status(200).json({ success: true, booking });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// 5. Get Booking History (Paginated search by Role filter)
+export const getBookingHistory = async (req, res) => {
+  const userId = req.user.id;
+  const role = req.user.role;
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 10;
+  const skip = (page - 1) * limit;
+
+  try {
+    const filter = role === 'worker' ? { workerId: userId } : { customerId: userId };
+    const bookings = await Booking.find(filter)
+      .populate('customerId', 'name mobile profileImage')
+      .populate('workerId', 'name mobile serviceCategory rating')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const total = await Booking.countDocuments(filter);
+
+    return res.status(200).json({
+      success: true,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+      bookings
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// 6. Cancel Booking (Before Acceptance)
+export const cancelBooking = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const booking = await Booking.findById(id);
+    if (!booking) return res.status(404).json({ success: false, error: 'Booking not found.' });
+
+    // Only pending bookings can be cancelled
+    if (booking.status !== 'pending') {
+      return res.status(400).json({ success: false, error: 'Only pending bookings can be cancelled.' });
+    }
+
+    booking.status = 'cancelled';
+    await booking.save();
+
+    // Clear any live timer associated with this booking
+    clearLiveTimer(id);
+
+    socketService.emitToRoom(`booking_${id}`, 'booking:cancelled', {
+      bookingId: id,
+      status: 'cancelled'
+    });
+
+    return res.status(200).json({ success: true, booking });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// 7. Start Booking (Accepted -> In Progress transitions)
+export const startBooking = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const booking = await Booking.findById(id);
+    if (!booking) return res.status(404).json({ success: false, error: 'Booking not found.' });
+
+    if (booking.status !== 'accepted') {
+      return res.status(400).json({ success: false, error: 'Booking must be accepted before starting.' });
+    }
+
+    booking.status = 'in_progress';
+    await booking.save();
+
+    socketService.emitToRoom(`booking_${id}`, 'booking:started', {
+      bookingId: id,
+      status: 'in_progress'
+    });
+
+    return res.status(200).json({ success: true, booking });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};

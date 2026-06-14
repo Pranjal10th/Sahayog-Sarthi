@@ -104,29 +104,80 @@ export const getWorkerDashboardData = async (req, res) => {
   }
 };
 
-// 3. Admin Route Simulator: Quick worker KYC decision (Approve/Reject handle) [cite: 102]
+// 3. Admin Route Simulator: Quick worker KYC decision (Approve/Reject/Block/Unblock)
 export const approveWorkerKYC = async (req, res) => {
-  const { id, action } = req.params; // Expecting action to be 'approve' or 'reject'
-
+  const { id } = req.params;
   try {
-    const targetStatus = action === 'reject' ? 'rejected' : 'approved';
-    const isOnline = action === 'reject' ? false : true;
-
     const worker = await Worker.findByIdAndUpdate(
       id, 
-      { kycStatus: targetStatus, isAvailable: isOnline }, // [cite: 102]
+      { kycStatus: 'approved', isAvailable: true },
       { new: true }
     );
-
-    if (!worker) return res.status(404).json({ error: 'Worker not found.' });
-
+    if (!worker) return res.status(404).json({ success: false, error: 'Worker not found.' });
     return res.status(200).json({ 
       success: true,
-      message: `Worker KYC ${targetStatus} and availability toggled successfully!`, 
+      message: 'Worker KYC approved and availability toggled successfully!', 
       worker 
     });
   } catch (error) {
-    return res.status(500).json({ error: error.message });
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+export const rejectWorkerKYC = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const worker = await Worker.findByIdAndUpdate(
+      id, 
+      { kycStatus: 'rejected', isAvailable: false },
+      { new: true }
+    );
+    if (!worker) return res.status(404).json({ success: false, error: 'Worker not found.' });
+    return res.status(200).json({ 
+      success: true,
+      message: 'Worker KYC rejected successfully!', 
+      worker 
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+export const blockWorkerAccount = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const worker = await Worker.findByIdAndUpdate(
+      id, 
+      { isBlocked: true, isAvailable: false },
+      { new: true }
+    );
+    if (!worker) return res.status(404).json({ success: false, error: 'Worker not found.' });
+    return res.status(200).json({ 
+      success: true,
+      message: 'Worker account blocked successfully!', 
+      worker 
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+export const unblockWorkerAccount = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const worker = await Worker.findByIdAndUpdate(
+      id, 
+      { isBlocked: false },
+      { new: true }
+    );
+    if (!worker) return res.status(404).json({ success: false, error: 'Worker not found.' });
+    return res.status(200).json({ 
+      success: true,
+      message: 'Worker account unblocked successfully!', 
+      worker 
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
   }
 };
 

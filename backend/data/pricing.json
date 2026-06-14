@@ -1,0 +1,36 @@
+{
+  "base_fares": {
+    "electrician": 150,
+    "plumber": 150,
+    "carpenter": 200,
+    "painter": 250,
+    "cleaner": 300
+  },
+  "hourly_rates": {
+    "electrician": 100,
+    "plumber": 100,
+    "carpenter": 150,
+    "painter": 200,
+    "cleaner": 150
+  },
+  "platform_commission_percentage": 15.0,
+  "surge_pricing": {
+    "night_charge": {
+      "active": true,
+      "time_range": "21:00-06:00",
+      "extra_charge_percentage": 20.0,
+      "description": "Raat ke samay (9 PM se 6 AM tak) service book karne par 20% surge charge lagta hai."
+    },
+    "emergency_booking": {
+      "active": true,
+      "flat_extra_charge": 100,
+      "description": "Instant emergency booking karne par flat Rs. 100 extra charge kiya jata hai."
+    }
+  },
+  "cancellation_fee_rules": {
+    "before_accept": 0,
+    "after_accept_within_5_mins": 0,
+    "after_accept_after_5_mins": 50,
+    "worker_arrived_and_cancelled": 100
+  }
+}

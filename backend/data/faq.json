@@ -1,0 +1,34 @@
+[
+  {
+    "question": "Sahayog Sarthi kya hai?",
+    "answer": "Sahayog Sarthi ek on-demand service booking platform hai jahan aap apne paas ke verified skilled professionals (Electrician, Plumber, Carpenter, etc.) ko ek click me book kar sakte hain. Real-time tracking, secure payments, aur transparent ratings ke saath."
+  },
+  {
+    "question": "Booking kaise karu?",
+    "answer": "Homepage par apni zaroorat ki category select karein (e.g., Electrician). Aapke 10km radius me available workers dikhenge. Kisi bhi worker ko select karein, apna address dalein, aur 'Confirm & Request Sarthi' button press karein. Worker ko turant notification jayega."
+  },
+  {
+    "question": "Payment kaise hoga?",
+    "answer": "Kaam complete hone ke baad aapko payment page par redirect kiya jayega. Razorpay gateway ke through secure online payment karein. Payment successful hone par worker ke wallet me 85% amount credit ho jata hai (15% platform commission ke baad)."
+  },
+  {
+    "question": "Booking cancel kaise karu?",
+    "answer": "Agar worker ne abhi booking accept nahi ki hai (status: pending), toh aap booking tracking page par jaake 'Cancel Booking' button se cancel kar sakte hain. Accept hone ke baad cancellation rules apply hote hain."
+  },
+  {
+    "question": "Worker ko rate kaise karu?",
+    "answer": "Payment successful hone ke baad aapko automatically ek feedback modal dikhega. 1-5 stars rating dein aur optional written review submit karein. Yeh rating worker ke profile par reflect hogi."
+  },
+  {
+    "question": "Kya main specific area me workers dhundh sakta hoon?",
+    "answer": "Haan, platform automatically aapke browser GPS location use karta hai aur 10km radius me available workers dikhata hai. Aap category filter bhi laga sakte hain."
+  },
+  {
+    "question": "Worker ki booking accept nahi ki toh kya hoga?",
+    "answer": "Agar worker 60 seconds me booking accept nahi karta, toh request automatically timeout ho jaati hai aur aapko notification milta hai. Aap doosre worker ko try kar sakte hain."
+  },
+  {
+    "question": "Refund policy kya hai?",
+    "answer": "Agar worker ne kaam shuru nahi kiya aur booking cancel ho gayi, toh full refund milega. Kaam shuru hone ke baad partial refund case-by-case basis par evaluate hoga. Admin team se contact karein."
+  }
+]

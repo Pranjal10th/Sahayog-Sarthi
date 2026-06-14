@@ -5,8 +5,12 @@ import path from 'path';
 import { 
   getNearbyWorkers, 
   approveWorkerKYC, 
+  rejectWorkerKYC,
+  blockWorkerAccount,
+  unblockWorkerAccount,
   updateWorkerProfile,
-  getWorkerDashboardData
+  getWorkerDashboardData,
+  getAdminOverviewHub
 } from '../controllers/workerController.js';
 import protect from '../middlewares/authMiddleware.js';
 
@@ -42,8 +46,12 @@ const upload = multer({
 
 // --- CORE MAPPINGS GATES ---
 router.get('/nearby', getNearbyWorkers);
+router.get('/admin/overview', protect, getAdminOverviewHub);
 router.get('/:id/dashboard', protect, getWorkerDashboardData);
-router.put('/:id/approve', approveWorkerKYC);
+router.put('/:id/approve', protect, approveWorkerKYC);
+router.put('/:id/reject', protect, rejectWorkerKYC);
+router.put('/:id/block', protect, blockWorkerAccount);
+router.put('/:id/unblock', protect, unblockWorkerAccount);
 
 // FR-02 & FR-288 Multi-part form handler injection layer
 router.put('/:id', protect, upload.array('documents', 3), updateWorkerProfile);

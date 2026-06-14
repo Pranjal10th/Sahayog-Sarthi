@@ -1,10 +1,19 @@
-import express from 'express';
-import { createPaymentOrder, verifyPaymentSignature } from '../controllers/paymentController.js';
-import protect from '../middlewares/authMiddleware.js';
+import mongoose from 'mongoose';
 
-const router = express.Router();
+const paymentSchema = new mongoose.Schema({
+  bookingId: { type: mongoose.Schema.Types.ObjectId, ref: 'Booking', required: false, index: true },
+  customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: false },
+  workerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Worker', required: true, index: true },
+  razorpayOrderId: { type: String, required: false },
+  razorpayPaymentId: { type: String },
+  amount: { type: Number, required: true },
+  platformFee: { type: Number, required: true, default: 0 },
+  workerAmount: { type: Number, required: true },
+  status: { type: String, enum: ['created', 'paid', 'failed', 'refunded', 'withdrawal_pending', 'withdrawal_completed'], default: 'created', index: true },
+  paymentMethod: { type: String },
+  transactionType: { type: String, enum: ['payment', 'withdrawal'], default: 'payment' },
+  transactionDate: { type: Date, default: Date.now }
+}, { timestamps: true });
 
-router.post('/create-order', protect, createPaymentOrder); // /api/v1/payments/create-order
-router.post('/verify', protect, verifyPaymentSignature);    // /api/v1/payments/verify
-
-export default router;
+const Payment = mongoose.model('Payment', paymentSchema);
+export default Payment;

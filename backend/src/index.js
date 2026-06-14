@@ -2,8 +2,8 @@
 import express from 'express';
 import http from 'http';
 import cors from 'cors';
-import dotenv from 'dotenv';
-import rateLimit from 'express-rate-limit'; // INJECTED
+import env from './config/env.js'; // Validates env vars on import – crashes early if missing
+import rateLimit from 'express-rate-limit';
 import connectDB from './config/db.js';
 import authRoutes from './routes/auth.js';
 import workerRoutes from './routes/worker.js';
@@ -12,8 +12,6 @@ import paymentRoutes from './routes/payment.js';
 import reviewRoutes from './routes/review.js'; 
 import { initSocket } from './services/socketService.js';
 import './services/telegramService.js';
-
-dotenv.config();
 const app = express();
 const server = http.createServer(app);
 
@@ -56,7 +54,7 @@ app.get('/', (req, res) => {
   res.send('🚀 Sahayog Sarthi Micro-Engine: All Core Backend APIs are 100% Operational!');
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT = env.PORT;
 server.listen(PORT, () => {
   console.log(`🔥 Real-time Cluster active on port ${PORT}`);
 });

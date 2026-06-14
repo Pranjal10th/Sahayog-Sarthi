@@ -1,0 +1,32 @@
+[
+  {
+    "service_id": "electrician",
+    "name": "Electrician (Bijli Mistri)",
+    "description": "Wiring, board fitting, fan repair, light installation, short circuit fixes, and other electrical appliances repairing.",
+    "scope_of_work": "Light and fan fitting, switches repair, fuse or MCB replacement, inverter checkup, water motor pump repair. Material/parts costing is extra."
+  },
+  {
+    "service_id": "plumber",
+    "name": "Plumber (Nal Saaz)",
+    "description": "Leaky tap fixes, pipe fitting, water tank repair, washbasin/toilet installation, blockage clearance, and sanitization services.",
+    "scope_id": "Tap replacement, leakage inspection, pipeline layout install, toilet flush system repair, drain block clearing. Fittings charges extra."
+  },
+  {
+    "service_id": "carpenter",
+    "name": "Carpenter (Badhai)",
+    "description": "Furniture repairs, door/window fitting, latch/lock installations, table or chair fixing, modular kitchen alignment.",
+    "scope_of_work": "Door alignment, new locks installation, handle replacement, drawer runner fixing, hinges lubrication. Wood and hardware parts costs extra."
+  },
+  {
+    "service_id": "painter",
+    "name": "Painter (Rangsaaz)",
+    "description": "Wall painting, patch touch-ups, wall putty application, door polishing, and wall waterproofing.",
+    "scope_of_work": "Interior/exterior single wall coating, damp repair, wood/iron paint, putty application. Paint material must be provided by the customer or purchased at extra cost."
+  },
+  {
+    "service_id": "cleaner",
+    "name": "Cleaner (Safai)",
+    "description": "Deep home cleaning, bathroom cleaning, kitchen degreasing, sofa and carpet dry cleaning.",
+    "scope_of_work": "Bathroom tiles scrubbing, kitchen sink and rack deep cleaning, window panes dusting, vacuuming. Cleaning chemicals brought by worker."
+  }
+]
