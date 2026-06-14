@@ -33,24 +33,44 @@ export default class AuthController {
         return res.status(200).json({ newCustomer: true, message: result.message });
       }
 
-      // Format response user data to match legacy mongoose doc JSON structure
+      // Format response user data to match legacy mongoose doc JSON structure dynamically
       const userRes = result.user;
-      const formattedUser = {
-        _id: userRes.id,
-        name: userRes.name,
-        mobile: userRes.mobile,
-        email: userRes.email,
-        profileImage: userRes.profileImage,
-        location: userRes.location,
-        address: userRes.address,
-        isBlocked: userRes.isBlocked,
-        createdAt: userRes.createdAt
-      };
+      let formattedUser;
+      if (result.role === 'worker') {
+        formattedUser = {
+          _id: userRes.id || userRes._id,
+          name: userRes.name,
+          mobile: userRes.mobile,
+          serviceCategory: userRes.serviceCategory,
+          experience: userRes.experience,
+          rating: userRes.rating,
+          totalRatings: userRes.totalRatings,
+          location: userRes.location,
+          isAvailable: userRes.isAvailable,
+          kycStatus: userRes.kycStatus,
+          walletBalance: userRes.walletBalance,
+          hourlyRate: userRes.hourlyRate,
+          isBlocked: userRes.isBlocked,
+          createdAt: userRes.createdAt
+        };
+      } else {
+        formattedUser = {
+          _id: userRes.id || userRes._id,
+          name: userRes.name,
+          mobile: userRes.mobile,
+          email: userRes.email,
+          profileImage: userRes.profileImage,
+          location: userRes.location,
+          address: userRes.address,
+          isBlocked: userRes.isBlocked,
+          createdAt: userRes.createdAt
+        };
+      }
 
       return res.status(200).json({
         token: result.token,
         user: formattedUser,
-        role: 'customer'
+        role: result.role
       });
     } catch (err) {
       return res.status(500).json({ error: err.message });

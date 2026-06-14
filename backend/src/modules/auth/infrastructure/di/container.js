@@ -17,7 +17,7 @@ const otpStore = new InMemoryOtpStore();
 
 // Use Cases
 export const sendOtpUseCase = new SendOtpUseCase(otpStore, smsService);
-export const verifyOtpUseCase = new VerifyOtpUseCase(userRepository, otpStore, tokenService);
+export const verifyOtpUseCase = new VerifyOtpUseCase(userRepository, workerRepository, otpStore, tokenService);
 export const registerWorkerUseCase = new RegisterWorkerUseCase(workerRepository, tokenService);
 export const globalTokenService = tokenService; // Direct export for legacy helper proxy if needed
 export const globalOtpStore = otpStore; // Direct export for test verification

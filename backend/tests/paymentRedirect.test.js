@@ -32,6 +32,7 @@ describe('Sahayog Sarthi Phase 1 Integration Tests', () => {
   let testBooking;
   let customerToken;
   let workerToken;
+  let adminToken;
 
   beforeAll(async () => {
     // Connect to test db (using MONGO_URI from env or local fallback)
@@ -79,6 +80,7 @@ describe('Sahayog Sarthi Phase 1 Integration Tests', () => {
     // Generate real JWT tokens
     customerToken = generateToken({ id: testCustomer._id, role: 'customer' });
     workerToken = generateToken({ id: testWorker._id, role: 'worker' });
+    adminToken = generateToken({ id: 'test-admin-id', role: 'admin' });
   });
 
   afterAll(async () => {
@@ -147,7 +149,7 @@ describe('Sahayog Sarthi Phase 1 Integration Tests', () => {
     // 1. Admin overview metrics check
     const metricsRes = await request(app)
       .get('/api/v1/workers/admin/overview')
-      .set('Authorization', `Bearer ${customerToken}`);
+      .set('Authorization', `Bearer ${adminToken}`);
 
     expect(metricsRes.status).toBe(200);
     expect(metricsRes.body.success).toBe(true);
@@ -156,7 +158,7 @@ describe('Sahayog Sarthi Phase 1 Integration Tests', () => {
     // 2. Approve worker
     const approveRes = await request(app)
       .put(`/api/v1/workers/${testWorker._id}/approve`)
-      .set('Authorization', `Bearer ${customerToken}`);
+      .set('Authorization', `Bearer ${adminToken}`);
 
     expect(approveRes.status).toBe(200);
     expect(approveRes.body.success).toBe(true);
@@ -166,7 +168,7 @@ describe('Sahayog Sarthi Phase 1 Integration Tests', () => {
     // 3. Block worker
     const blockRes = await request(app)
       .put(`/api/v1/workers/${testWorker._id}/block`)
-      .set('Authorization', `Bearer ${customerToken}`);
+      .set('Authorization', `Bearer ${adminToken}`);
 
     expect(blockRes.status).toBe(200);
     expect(blockRes.body.success).toBe(true);
@@ -176,7 +178,7 @@ describe('Sahayog Sarthi Phase 1 Integration Tests', () => {
     // 4. Unblock worker
     const unblockRes = await request(app)
       .put(`/api/v1/workers/${testWorker._id}/unblock`)
-      .set('Authorization', `Bearer ${customerToken}`);
+      .set('Authorization', `Bearer ${adminToken}`);
 
     expect(unblockRes.status).toBe(200);
     expect(unblockRes.body.success).toBe(true);

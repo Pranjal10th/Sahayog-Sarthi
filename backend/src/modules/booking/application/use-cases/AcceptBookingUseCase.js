@@ -11,7 +11,7 @@ export default class AcceptBookingUseCase {
     this.socketAdapter     = socketAdapter;
   }
 
-  async execute(bookingId) {
+  async execute(bookingId, reqUserId) {
     // Cancel the 60s pending timeout immediately on worker intervention
     clearBookingTimeoutTimer(bookingId);
 
@@ -19,6 +19,12 @@ export default class AcceptBookingUseCase {
     if (!booking) {
       const err = new Error('Booking not found.');
       err.statusCode = 404;
+      throw err;
+    }
+
+    if (reqUserId && booking.workerId.toString() !== reqUserId) {
+      const err = new Error('Access denied. You are not the assigned worker for this booking.');
+      err.statusCode = 403;
       throw err;
     }
 

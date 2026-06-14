@@ -28,7 +28,7 @@ export const createBooking = async (req, res) => {
 
 export const acceptBooking = async (req, res) => {
   try {
-    const booking = await acceptBookingUseCase.execute(req.params.id);
+    const booking = await acceptBookingUseCase.execute(req.params.id, req.user?.id);
     return res.status(200).json({ success: true, booking });
   } catch (err) {
     return res.status(err.statusCode || 500).json({ error: err.message });
@@ -37,7 +37,7 @@ export const acceptBooking = async (req, res) => {
 
 export const startBooking = async (req, res) => {
   try {
-    const booking = await startBookingUseCase.execute(req.params.id);
+    const booking = await startBookingUseCase.execute(req.params.id, req.user?.id);
     return res.status(200).json({ success: true, booking });
   } catch (err) {
     return res.status(err.statusCode || 500).json({ success: false, error: err.message });
@@ -46,7 +46,7 @@ export const startBooking = async (req, res) => {
 
 export const completeBooking = async (req, res) => {
   try {
-    const booking = await completeBookingUseCase.execute(req.params.id);
+    const booking = await completeBookingUseCase.execute(req.params.id, req.user?.id);
     return res.status(200).json({ success: true, booking });
   } catch (err) {
     return res.status(err.statusCode || 500).json({ error: err.message });
@@ -55,7 +55,7 @@ export const completeBooking = async (req, res) => {
 
 export const cancelBooking = async (req, res) => {
   try {
-    const booking = await cancelBookingUseCase.execute(req.params.id);
+    const booking = await cancelBookingUseCase.execute(req.params.id, req.user?.id);
     return res.status(200).json({ success: true, booking });
   } catch (err) {
     return res.status(err.statusCode || 500).json({ success: false, error: err.message });

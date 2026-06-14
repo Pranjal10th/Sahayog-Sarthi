@@ -4,7 +4,7 @@
 import express from 'express';
 import multer from 'multer';
 import path from 'path';
-import protect from '../../../../../middlewares/authMiddleware.js';
+import protect, { restrictTo } from '../../../../../middlewares/authMiddleware.js';
 import {
   getNearbyWorkers,
   getWorkerDashboardData,
@@ -41,12 +41,12 @@ const upload = multer({
 
 // --- Routes ---
 router.get('/nearby',               getNearbyWorkers);
-router.get('/admin/overview',       protect, getAdminOverview);
+router.get('/admin/overview',       protect, restrictTo('admin'), getAdminOverview);
 router.get('/:id/dashboard',        protect, getWorkerDashboardData);
-router.put('/:id/approve',          protect, approveWorkerKYC);
-router.put('/:id/reject',           protect, rejectWorkerKYC);
-router.put('/:id/block',            protect, blockWorkerAccount);
-router.put('/:id/unblock',          protect, unblockWorkerAccount);
+router.put('/:id/approve',          protect, restrictTo('admin'), approveWorkerKYC);
+router.put('/:id/reject',           protect, restrictTo('admin'), rejectWorkerKYC);
+router.put('/:id/block',            protect, restrictTo('admin'), blockWorkerAccount);
+router.put('/:id/unblock',          protect, restrictTo('admin'), unblockWorkerAccount);
 router.put('/:id',                  protect, upload.array('documents', 3), updateWorkerProfile);
 
 export default router;
