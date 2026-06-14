@@ -96,15 +96,30 @@ export const acceptBooking = async (req, res) => {
 
     const booking = await Booking.findById(id);
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
-    if (booking.status !== 'pending') return res.status(400).json({ error: 'Booking already handled.' });
+    
+    // Strict State Machine Constraint: Must be pending
+    if (booking.status !== 'pending') {
+      return res.status(400).json({ error: `Booking cannot transition from '${booking.status}' to 'accepted'.` });
+    }
+
+    // Blocked Worker Constraint Check
+    const worker = await Worker.findById(booking.workerId);
+    if (!worker) return res.status(404).json({ error: 'Sarthi profile not found.' });
+    if (worker.isBlocked) {
+      return res.status(403).json({ error: 'This Sarthi account is blocked and cannot accept bookings.' });
+    }
 
     booking.status = 'accepted';
     await booking.save();
 
-    socketService.emitToUser(booking.customerId.toString(), 'booking:accepted', {
-      bookingId: booking._id,
-      status: 'accepted'
-    });
+    try {
+      socketService.emitToUser(booking.customerId.toString(), 'booking:accepted', {
+        bookingId: booking._id,
+        status: 'accepted'
+      });
+    } catch (socketErr) {
+      console.warn("⚠️ Socket emit skipped (Uninitialized):", socketErr.message);
+    }
 
     return res.status(200).json({ success: true, booking });
   } catch (error) {
@@ -119,14 +134,23 @@ export const completeBooking = async (req, res) => {
     const booking = await Booking.findById(id);
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
 
+    // Strict State Machine Constraint: Must be in_progress
+    if (booking.status !== 'in_progress') {
+      return res.status(400).json({ error: `Booking cannot transition from '${booking.status}' to 'completed'.` });
+    }
+
     booking.status = 'completed';
     booking.completedAt = new Date();
     await booking.save();
 
-    socketService.emitToRoom(`booking_${id}`, 'booking:completed', {
-      bookingId: id,
-      amount: booking.amount
-    });
+    try {
+      socketService.emitToRoom(`booking_${id}`, 'booking:completed', {
+        bookingId: id,
+        amount: booking.amount
+      });
+    } catch (socketErr) {
+      console.warn("⚠️ Socket emit skipped (Uninitialized):", socketErr.message);
+    }
 
     return res.status(200).json({ success: true, booking });
   } catch (error) {
@@ -182,28 +206,53 @@ export const getBookingHistory = async (req, res) => {
   }
 };
 
-// 6. Cancel Booking (Before Acceptance)
+// 6. Cancel Booking (Allowed from pending or accepted)
 export const cancelBooking = async (req, res) => {
   const { id } = req.params;
   try {
     const booking = await Booking.findById(id);
     if (!booking) return res.status(404).json({ success: false, error: 'Booking not found.' });
 
-    // Only pending bookings can be cancelled
-    if (booking.status !== 'pending') {
-      return res.status(400).json({ success: false, error: 'Only pending bookings can be cancelled.' });
+    // Strict State Machine Constraint: Only pending or accepted can be cancelled
+    if (booking.status !== 'pending' && booking.status !== 'accepted') {
+      return res.status(400).json({ 
+        success: false, 
+        error: `Booking cannot transition from '${booking.status}' to 'cancelled'.` 
+      });
     }
 
+    const oldStatus = booking.status;
     booking.status = 'cancelled';
+
+    // Assess metadata-only cancellation fee if cancelled late (after acceptance)
+    if (oldStatus === 'accepted') {
+      booking.metadata = {
+        ...booking.metadata,
+        cancellationFee: {
+          amount: 50,
+          currency: 'INR',
+          assessedAt: new Date(),
+          reason: 'Cancellation assessed after booking acceptance by Sarthi'
+        }
+      };
+    }
+
     await booking.save();
 
-    // Clear any live timer associated with this booking
-    clearLiveTimer(id);
+    // Clear active timeouts if pending
+    if (oldStatus === 'pending') {
+      clearLiveTimer(id);
+    }
 
-    socketService.emitToRoom(`booking_${id}`, 'booking:cancelled', {
-      bookingId: id,
-      status: 'cancelled'
-    });
+    try {
+      socketService.emitToRoom(`booking_${id}`, 'booking:cancelled', {
+        bookingId: id,
+        status: 'cancelled',
+        metadata: booking.metadata
+      });
+    } catch (socketErr) {
+      console.warn("⚠️ Socket emit skipped (Uninitialized):", socketErr.message);
+    }
 
     return res.status(200).json({ success: true, booking });
   } catch (error) {
@@ -218,17 +267,22 @@ export const startBooking = async (req, res) => {
     const booking = await Booking.findById(id);
     if (!booking) return res.status(404).json({ success: false, error: 'Booking not found.' });
 
+    // Strict State Machine Constraint: Must be accepted
     if (booking.status !== 'accepted') {
-      return res.status(400).json({ success: false, error: 'Booking must be accepted before starting.' });
+      return res.status(400).json({ success: false, error: `Booking cannot transition from '${booking.status}' to 'in_progress'.` });
     }
 
     booking.status = 'in_progress';
     await booking.save();
 
-    socketService.emitToRoom(`booking_${id}`, 'booking:started', {
-      bookingId: id,
-      status: 'in_progress'
-    });
+    try {
+      socketService.emitToRoom(`booking_${id}`, 'booking:started', {
+        bookingId: id,
+        status: 'in_progress'
+      });
+    } catch (socketErr) {
+      console.warn("⚠️ Socket emit skipped (Uninitialized):", socketErr.message);
+    }
 
     return res.status(200).json({ success: true, booking });
   } catch (error) {

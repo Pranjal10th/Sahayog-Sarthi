@@ -28,4 +28,8 @@ const chatSchema = new mongoose.Schema({
   }
 });
 
-export default mongoose.model('Chat', chatSchema);
+// Compound index for historical chat retrieval (sorted old to new)
+chatSchema.index({ bookingId: 1, timestamp: 1 });
+
+const Chat = mongoose.model('Chat', chatSchema);
+export default Chat;

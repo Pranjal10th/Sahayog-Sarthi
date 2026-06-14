@@ -6,7 +6,7 @@ const bookingSchema = new mongoose.Schema({
   serviceType: { type: String, required: true },
   status: { 
     type: String, 
-    enum: ['pending', 'accepted', 'in_progress', 'completed', 'cancelled'],
+    enum: ['pending', 'accepted', 'in_progress', 'completed', 'paid', 'cancelled'],
     default: 'pending' 
   },
   scheduledAt: { type: Date, default: Date.now },
@@ -14,8 +14,15 @@ const bookingSchema = new mongoose.Schema({
   amount: { type: Number, required: true },
   paymentStatus: { type: String, enum: ['pending', 'paid', 'refunded'], default: 'pending' },
   customerAddress: { type: String, required: true },
-  notes: { type: String }
+  notes: { type: String },
+  metadata: { type: mongoose.Schema.Types.Mixed, default: {} }
 }, { timestamps: true });
+
+// Performance Query Compound Indexes
+bookingSchema.index({ customerId: 1, createdAt: -1 });
+bookingSchema.index({ workerId: 1, createdAt: -1 });
+bookingSchema.index({ workerId: 1, status: 1 });
+bookingSchema.index({ status: 1, createdAt: -1 });
 
 const Booking = mongoose.model('Booking', bookingSchema);
 export default Booking;

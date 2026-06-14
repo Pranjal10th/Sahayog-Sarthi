@@ -6,8 +6,9 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "test": "jest",
-    "test:phase1": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/paymentRedirect.test.js --runInBand --detectOpenHandles"
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/ --runInBand --detectOpenHandles",
+    "test:phase1": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/paymentRedirect.test.js --runInBand --detectOpenHandles",
+    "test:phase2": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/bookingStateMachine.test.js --runInBand --detectOpenHandles"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

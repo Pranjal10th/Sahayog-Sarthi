@@ -221,6 +221,16 @@ export const updateWorkerProfile = async (req, res) => {
     const { id } = req.params;
     const updateData = req.body; 
 
+    const worker = await Worker.findById(id);
+    if (!worker) {
+      return res.status(404).json({ success: false, error: 'Worker profile nahi mili.' });
+    }
+
+    // Constraint: Blocked worker cannot toggle availability to online
+    if (worker.isBlocked && updateData.isAvailable === true) {
+      return res.status(403).json({ success: false, error: 'Blocked workers cannot make themselves available.' });
+    }
+
     const updatedWorker = await Worker.findByIdAndUpdate(
       id,
       { $set: updateData },

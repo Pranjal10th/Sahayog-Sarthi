@@ -1,0 +1,139 @@
+# Sahayog Sarthi Enterprise Upgrade: Revised Implementation Plan & File-by-File Execution Strategy
+
+This plan incorporates user decisions and details the technical specifications for **Phase 2: Database Indexes & Booking State Machine**.
+
+---
+
+## Approved Architecture Decisions
+
+1.  **Pages Router Retention:** Maintain `/src/pages` Next.js router.
+2.  **SMS Gateway:** MSG91 as the primary provider with Twilio as fallback.
+3.  **AI Knowledge Base:** Static JSON files (`faq.json`, `policies.json`, `services.json`, `pricing.json`) in `backend/data/`.
+4.  **Security Hardening Phase:** Mandatory Phase 4 checkpoint.
+5.  **Phase 2 Focus:** Performance indexing, data consistency backfills, and booking lifecycle state machine validations.
+
+---
+
+## Phase 2: Database Indexes & Booking State Machine
+
+## 1. Exact Files That Will Be Modified
+
+### Backend Models (Schema Indexing Definitions)
+*   [backend/src/models/Booking.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/Booking.js): 
+    *   Extend `status` enum to include `'paid'`: `['pending', 'accepted', 'in_progress', 'completed', 'paid', 'cancelled']`.
+    *   Add `metadata: { type: mongoose.Schema.Types.Mixed, default: {} }` to hold temporary metrics like cancellation fee information.
+    *   Define compound index configurations for consumer history, Sarthi history, dashboard status filters, and admin telemetry.
+*   [backend/src/models/Review.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/Review.js): Add indexing on `workerId` and `customerId` fields to optimize profile feedback loads.
+*   [backend/src/models/Chat.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/Chat.js): Add compound index on `bookingId` and `timestamp` to optimize chat history loads.
+*   [backend/src/models/Payment.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/Payment.js): Add unique index for `razorpayOrderId` and compound index for worker withdrawal history queries.
+
+### Backend Controllers (State Machine & Guard Implementation)
+*   [backend/src/controllers/bookingController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/bookingController.js): 
+    *   Implement strict lifecycle guards on booking transitions.
+    *   Allow workers to start bookings manually in `startBooking` **without GPS coordinates / geofencing checks**.
+    *   In `cancelBooking`, if cancellation occurs after acceptance (late), calculate the cancellation fee and save it to the booking's `metadata` block (e.g., `metadata.cancellationFee = 50`) **without performing actual wallet or card balance deductions**.
+*   [backend/src/controllers/paymentController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/paymentController.js):
+    *   In `verifyPaymentSignature`, assert that the booking's current status is `completed` before processing verification.
+    *   Update the booking status to `paid` upon successful payment verification.
+*   [backend/src/controllers/workerController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/workerController.js): Inject checks to prevent blocked worker accounts (`isBlocked: true`) from modifying availability or accepting new bookings.
+
+### Migrations & Scripting
+*   [NEW] [backend/migrations/20260614_phase2_migration.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/migrations/20260614_phase2_migration.js): Node migration script to build indexes programmatically and run payment record data backfills.
+*   [NEW] [backend/migrations/20260614_phase2_rollback.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/migrations/20260614_phase2_rollback.js): Rollback script to revert indexes and rollback backfill operations.
+
+---
+
+## 2. Database Indexes That Will Be Added
+
+| Collection | Index Configuration | Usage / Optimized Query |
+| :--- | :--- | :--- |
+| **bookings** | `{ customerId: 1, createdAt: -1 }` | Customer paginated history (`GET /bookings/history`) |
+| **bookings** | `{ workerId: 1, createdAt: -1 }` | Sarthi dashboard transactions & history queries |
+| **bookings** | `{ workerId: 1, status: 1 }` | Active dashboard queries for available Sarthis |
+| **bookings** | `{ status: 1, createdAt: -1 }` | Admin Live Operations aggregation listings |
+| **reviews** | `{ workerId: 1 }` | Aggregate ratings & display feedback on Sarthi profile |
+| **reviews** | `{ customerId: 1 }` | Fetching past feedback submitted by a customer |
+| **chats** | `{ bookingId: 1, timestamp: 1 }` | Historical chat message log retrieval (sorted old to new) |
+| **payments** | `{ workerId: 1, createdAt: -1 }` | Sarthi wallet withdrawal transaction log ledger |
+| **payments** | `{ razorpayOrderId: 1 }` | Unique index to accelerate checkout signature lookups |
+
+---
+
+## 3. Booking State Machine Design and Transition Rules
+
+The booking state transitions will follow a strict state validation check schema. Any attempt to skip or violate the lifecycle sequence will respond with `400 Bad Request` payload error.
+
+### State Transition Diagram
+```mermaid
+stateDiagram-v2
+    [*] --> pending : Customer creates booking
+    pending --> accepted : Sarthi accepts booking
+    pending --> cancelled : 60s timeout / Customer cancels early
+    accepted --> in_progress : Sarthi starts booking (Manual, no GPS validation)
+    accepted --> cancelled : Customer cancels late (Rs.50 fee tracked in metadata)
+    in_progress --> completed : Sarthi completes work
+    completed --> paid : Payment verified successfully (via verification hook)
+    cancelled --> [*]
+    paid --> [*]
+```
+
+### Transition Rule Constraints Matrix
+
+| Current State | Target State | Triggered By | Constraint Rules |
+| :--- | :--- | :--- | :--- |
+| `pending` | `accepted` | Worker | Sarthi must not be blocked (`isBlocked !== true`) |
+| `pending` | `cancelled` | Customer / System | Allowed freely. Automatically triggered if 60s timeout occurs |
+| `accepted` | `in_progress` | Worker | Sarthi manually activates work start (No GPS validation check enforced) |
+| `accepted` | `cancelled` | Customer | Allowed. Late cancellation tracks a flat Rs.50 fee in booking `metadata.cancellationFee` (no actual wallet deduction) |
+| `in_progress` | `completed` | Worker | Sarthi submits complete. Transitions to completed. |
+| `completed` | `paid` | System (Payment) | Triggered upon successful signature verification check in `verifyPaymentSignature`. |
+
+---
+
+## 4. Migration Strategy
+
+1.  **Local/Staging Execution:**
+    *   Create a migration script `20260614_phase2_migration.js` that connects to MongoDB, triggers `createIndexes()` programmatically on all targeted collections, and runs database query backfills.
+    *   Integrate a CLI script `"db:migrate": "node migrations/20260614_phase2_migration.js"` into backend package scripts.
+2.  **Production Readiness:**
+    *   The index creations are run in the background (`background: true` option in mongoose indexing) to prevent blocking write lockups on live production collections.
+
+---
+
+## 5. Rollback Strategy
+
+1.  **Index Drops:**
+    *   Write a corresponding rollback file `20260614_phase2_rollback.js`.
+    *   Trigger `dropIndex()` commands targeting each of the newly introduced compound indexes.
+    *   Keep the default index `_id` and unique `mobile` keys intact.
+2.  **Backfill Reversion:**
+    *   Optionally remove the `transactionType` fields from pre-existing records or retain them (since the model defaults to "payment" safely).
+
+---
+
+## 6. Expected Impact on Existing APIs
+
+*   **POST `/bookings` (Create):** No negative functional impact. Startup response time remains unaffected; the indexing speeds up subsequent queries.
+*   **PUT `/bookings/:id/accept`:**
+    *   Ensures that only booking requests in `pending` state can be accepted.
+    *   Rejects accept request if the worker's status is `isBlocked: true` on their MongoDB record.
+*   **PUT `/bookings/:id/cancel`:**
+    *   If booking is in `accepted` state, cancellation transitions status to `cancelled` but injects cancellation fee parameters in booking metadata (no direct wallet deduction).
+*   **PUT `/bookings/:id/complete`:**
+    *   Enforces that booking status must be `in_progress` to transition to `completed`.
+*   **POST `/api/v1/payments/verify`:**
+    *   Asserts that the booking's current status is `completed` before verifying payment.
+    *   Sets booking status to `paid` upon successful verification.
+*   **GET `/bookings/history` & `/workers/admin/overview`:**
+    *   Performance increases due to query optimizations (swapping Collection Scans for Index lookups).
+
+---
+
+## 7. Any Data Backfill Requirements for Existing Records
+
+*   **Payment collection backfills:**
+    *   All pre-existing Payment records that do not contain a `transactionType` property must be set to `transactionType: "payment"` to maintain integrity against the updated model schema.
+    *   The migration script will execute:
+        `await Payment.updateMany({ transactionType: { $exists: false } }, { $set: { transactionType: 'payment' } });`
+*   **Booking collection backfills:**
+    *   **None.** Database inspection of the `bookings` collection returned **0 records**. Therefore, no booking status backfill is required prior to migration execution.

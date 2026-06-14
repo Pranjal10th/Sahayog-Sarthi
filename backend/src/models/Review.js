@@ -34,4 +34,9 @@ const reviewSchema = new mongoose.Schema({
   }
 });
 
-export default mongoose.model('Review', reviewSchema);
+// Indexes for aggregating profile ratings and history searches
+reviewSchema.index({ workerId: 1 });
+reviewSchema.index({ customerId: 1 });
+
+const Review = mongoose.model('Review', reviewSchema);
+export default Review;

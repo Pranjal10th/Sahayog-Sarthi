@@ -1,0 +1,114 @@
+# Sahayog Sarthi – Phase 1 & Phase 2 Completion Walkthrough
+
+This document outlines the completion of Phase 0, Phase 1, and Phase 2, covering initial environment verification, missing REST API endpoints, database schema indexing optimizations, and the strict booking state machine implementation.
+
+---
+
+## Part A: Phase 0 & Phase 1 Walkthrough
+
+### 1. Files Created & Modified (Phase 0 & 1)
+
+#### Created Files
+- [backend/data/policies.json](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/data/policies.json): Static JSON file containing cancellation, refund, safety, and code of conduct policies.
+- [backend/data/services.json](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/data/services.json): Static JSON file describing available categories (Electrician, Plumber, Carpenter, Cleaner, Painter) and their scope of work.
+- [backend/data/pricing.json](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/data/pricing.json): Static JSON file outlining base rates, hourly pricing structures, platforms fees, and night/emergency surge rules.
+- [backend/tests/paymentRedirect.test.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/tests/paymentRedirect.test.js): Integration test suite verifying Razorpay order generation, signature verification, Sarthi wallet settlement, KYC admin operations, and withdrawals using real JWT signatures.
+
+#### Modified Files
+- [backend/src/models/Payment.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/Payment.js): Completely replaced duplicate Express router configurations with the standard Mongoose schema supporting both payments and withdrawals.
+- [backend/src/controllers/paymentController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/paymentController.js): Integrated Payment schema logging into `createPaymentOrder` and `verifyPaymentSignature` endpoints, and implemented `requestWalletWithdrawal` payout logic.
+- [backend/src/controllers/workerController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/workerController.js): Implemented explicit individual functions for approving (`approveWorkerKYC`), rejecting (`rejectWorkerKYC`), blocking (`blockWorkerAccount`), and unblocking (`unblockWorkerAccount`) workers.
+- [backend/src/routes/worker.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/routes/worker.js): Registered explicit KYC routes and the `/admin/overview` metric aggregation endpoint in the correct priority order.
+- [backend/src/controllers/bookingController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/bookingController.js): Implemented missing methods `getBookingById`, `getBookingHistory`, `cancelBooking`, and `startBooking`.
+- [backend/src/routes/booking.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/routes/booking.js): Registered all missing endpoints and connected them to the authentication middleware.
+- [backend/src/routes/payment.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/routes/payment.js): Registered the `/withdraw` endpoint.
+- [backend/package.json](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/package.json): Integrated the `test:phase1` script.
+- [frontend/src/pages/payment/[bookingId].js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/frontend/src/pages/payment/%5BbookingId%5D.js): Modified URL success query arguments to align with landing page expectations (`payment_success=true&booking_id=${bookingId}`).
+- [frontend/src/pages/admin/index.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/frontend/src/pages/admin/index.js): Replaced fallback sandbox mock states with live API console triggers, and integrated descriptive error handling alerts.
+
+---
+
+## Part B: Phase 2 Walkthrough (Database Indexes & Booking State Machine)
+
+### 1. Files Created & Modified (Phase 2)
+
+#### Created Files
+- [backend/tests/bookingStateMachine.test.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/tests/bookingStateMachine.test.js): Integration test suite covering the booking state machine transitions, alternative cancellation paths, blocked status validations, and transition error constraints.
+
+#### Modified Files
+- [backend/src/models/Booking.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/Booking.js): Added the new `'paid'` state to the status enum, added a flexible `metadata` field, and defined compound indexes for consumer history, Sarthi history, dashboard status filters, and admin telemetry.
+- [backend/src/models/Review.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/Review.js): Indexed `workerId` and `customerId` fields for optimized profile feedback load speeds.
+- [backend/src/models/Chat.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/Chat.js): Defined compound index `{ bookingId: 1, timestamp: 1 }` for faster chronological message retrieval.
+- [backend/src/models/Payment.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/Payment.js): Set `razorpayOrderId` as a sparse unique index to support payment lookups and withdrawals, and defined compound index `{ workerId: 1, createdAt: -1 }`.
+- [backend/src/controllers/bookingController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/bookingController.js): Implemented strict transition guards on booking lifecycle changes, and wrapped all Socket.io emissions in try/catch blocks to ensure API resilience.
+- [backend/src/controllers/paymentController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/paymentController.js): Enforced completed status checks before validating payment signature details, and transitioned booking status to `paid` upon successful verification.
+- [backend/src/controllers/workerController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/workerController.js): Added check to prevent blocked workers from modifying their profile to go online/available.
+- [backend/package.json](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/package.json): Integrated the `test:phase2` script.
+
+---
+
+### 2. Database Indexes Created
+
+The following database indexes have been defined and are automatically instantiated by Mongoose upon backend startup:
+
+| Collection | Index Fields | Usage / Optimized Query Pattern |
+| :--- | :--- | :--- |
+| **bookings** | `{ customerId: 1, createdAt: -1 }` | Paginated booking history lists for customers |
+| **bookings** | `{ workerId: 1, createdAt: -1 }` | Sarthi dashboard transaction feeds |
+| **bookings** | `{ workerId: 1, status: 1 }` | Active booking queries (accepted & in_progress) |
+| **bookings** | `{ status: 1, createdAt: -1 }` | Admin operations panel listings |
+| **reviews** | `{ workerId: 1 }` | Sarthi profile review aggregates and average ratings |
+| **reviews** | `{ customerId: 1 }` | Customer feedback logs |
+| **chats** | `{ bookingId: 1, timestamp: 1 }` | Chronological chat history loading in the tracker page |
+| **payments** | `{ workerId: 1, createdAt: -1 }` | Sarthi wallet withdrawal transaction logs |
+| **payments** | `{ razorpayOrderId: 1 }` | Unique sparse index to accelerate checkout validation |
+
+---
+
+### 3. State Machine Implementation Details
+
+We have implemented a strict booking lifecycle sequence:
+```text
+pending ──> accepted ──> in_progress ──> completed ──> paid
+```
+
+#### Valid Lifecycle Flow
+- **`pending` → `accepted`**: Handled via `acceptBooking`. Asserts the booking is currently `pending`, and verifies that the Sarthi's account is not blocked (`worker.isBlocked !== true`).
+- **`accepted` → `in_progress`**: Handled via `startBooking`. Allows workers to start bookings manually **without geofencing or GPS coordinate validation** (which will be added in a later phase).
+- **`in_progress` → `completed`**: Handled via `completeBooking`. Transitions work completion when the Sarthi finishes the job.
+- **`completed` → `paid`**: Handled in `verifyPaymentSignature`. Successful checkout signature verification transitions the booking's `status` to `paid` and `paymentStatus` to `paid`.
+
+#### Alternative Cancellation Paths
+- **`pending` → `cancelled`**: Customer can cancel directly without any penalties or fees.
+- **`accepted` → `cancelled`**: Late cancellation is allowed but assesses a Rs. 50 metadata fee recorded under the booking's `metadata.cancellationFee` dictionary (no actual wallet/card deductions are performed initially).
+- Cancellations are strictly blocked if a booking is in `'in_progress'`, `'completed'`, or `'paid'` states.
+
+---
+
+### 4. Test Suite Execution & Validation Reports
+
+The Phase 2 integration test suite (`backend/tests/bookingStateMachine.test.js`) executed and passed successfully with a **100% Success Rate**:
+
+```bash
+PASS tests/bookingStateMachine.test.js
+  Sahayog Sarthi Booking State Machine Integration Tests
+    1. Valid Lifecycle Transitions
+      √ Should execute full lifecycle: pending -> accepted -> in_progress -> completed -> paid (372 ms)
+    2. Alternative Cancellation Paths
+      √ Should allow pending -> cancelled transition without penalty fee (25 ms)
+      √ Should allow accepted -> cancelled transition and track Rs.50 metadata fee without deducting balance (59 ms)
+    3. Blocked Worker Validation Constraints
+      √ Blocked worker cannot accept a booking (35 ms)
+      √ Blocked worker cannot modify profile to go online/available (207 ms)
+    4. Invalid Transitions (guards)
+      √ Should fail if starting booking from pending (not accepted) (28 ms)
+      √ Should fail if completing booking from accepted (not in_progress) (23 ms)
+      √ Should fail if verifying payment signature on non-completed booking (25 ms)
+      √ Should fail if cancelling a completed booking (23 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       9 passed, 9 total
+Snapshots:   0 total
+Time:        4.368 s
+Ran all test suites matching tests/bookingStateMachine.test.js.
+```

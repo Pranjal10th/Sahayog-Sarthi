@@ -96,9 +96,14 @@ export const verifyPaymentSignature = async (req, res) => {
     const booking = await Booking.findById(bookingId);
     if (!booking) return res.status(404).json({ error: 'Booking record not found.' });
 
+    // Assert that booking is completed before paying (Strict State Machine Constraint)
+    if (booking.status !== 'completed') {
+      return res.status(400).json({ error: `Booking must be in 'completed' status to verify payment (current: '${booking.status}').` });
+    }
+
     // Sandbox validation bypass flag check
     if (razorpay_order_id && razorpay_order_id.startsWith('order_mock_')) {
-      await Booking.findByIdAndUpdate(bookingId, { paymentStatus: 'paid' });
+      await Booking.findByIdAndUpdate(bookingId, { paymentStatus: 'paid', status: 'paid' });
       
       const commissionRate = Number(process.env.PLATFORM_COMMISSION) || 0.15;
       const netEarnings = booking.amount * (1 - commissionRate);
@@ -127,7 +132,7 @@ export const verifyPaymentSignature = async (req, res) => {
         success: true, 
         mocked: true,
         message: 'Sandbox payment verification simulated. Worker wallet credited!',
-        booking: { ...booking._doc, paymentStatus: 'paid' }
+        booking: { ...booking._doc, paymentStatus: 'paid', status: 'paid' }
       });
     }
 
@@ -139,7 +144,7 @@ export const verifyPaymentSignature = async (req, res) => {
       .digest('hex');
 
     if (generated_signature === razorpay_signature) {
-      await Booking.findByIdAndUpdate(bookingId, { paymentStatus: 'paid' });
+      await Booking.findByIdAndUpdate(bookingId, { paymentStatus: 'paid', status: 'paid' });
       const commissionRate = Number(process.env.PLATFORM_COMMISSION) || 0.15;
       const netEarnings = booking.amount * (1 - commissionRate);
 
@@ -161,7 +166,8 @@ export const verifyPaymentSignature = async (req, res) => {
 
       console.log(`💰 [WALLET SETTLEMENT] Production Pay Verified. Transferred ₹${netEarnings} to Sarthi Wallet.`);
 
-      return res.status(200).json({ success: true, message: 'Payment verified!', booking });
+      const updatedBookingObj = await Booking.findById(bookingId);
+      return res.status(200).json({ success: true, message: 'Payment verified!', booking: updatedBookingObj });
     } else {
       await Payment.findOneAndUpdate(
         { razorpayOrderId: razorpay_order_id },
