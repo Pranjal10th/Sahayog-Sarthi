@@ -1,0 +1,78 @@
+# Phase 3.1.1 Telegram Stabilization Patch Plan
+
+This plan details the implementation strategy to stabilize the Telegram Bot integration across different environments, eliminating ETELEGRAM 409 conflict noise and preventing background polling loops from hanging test runners or development workflows.
+
+---
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Environment Variables Update:**
+> This patch introduces `ENABLE_TELEGRAM_BOT` to selectively enable the Telegram client. During development and testing, this should be kept as `false` or set to `true` with polling disabled to avoid network polling conflicts on the same bot token.
+
+---
+
+## Open Questions
+
+*No open questions are active. The proposed approach satisfies the stabilization requirements completely.*
+
+---
+
+## Proposed Changes
+
+### Backend Infrastructure & Configuration
+
+#### [MODIFY] [env.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/config/env.js)
+*   Register `ENABLE_TELEGRAM_BOT` as an optional configuration variable.
+*   Expose `ENABLE_TELEGRAM_BOT` in the exported configuration object, defaulting to `false` when missing or not set to `'true'`.
+
+#### [MODIFY] [telegramService.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/services/telegramService.js)
+*   Import `env` from configuration module instead of raw `process.env`.
+*   Wrap bot initialization block: Only instantiate `TelegramBot` when `ENABLE_TELEGRAM_BOT` is `'true'` (or equivalent config flag) and `TELEGRAM_BOT_TOKEN` is present.
+*   Determine polling activation flag: Disable `polling` (set `polling: false`) during tests (`NODE_ENV === 'test'`), local development (`NODE_ENV === 'development'`), and CI/CD pipelines (`process.env.CI` or `GITHUB_ACTIONS`).
+*   Ensure the helper function `sendBookingAlertToWorker` returns early if the bot is not initialized, preserving safe mock-like fallback behavior.
+
+#### [MODIFY] [.env.example](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/.env.example)
+*   Add the `ENABLE_TELEGRAM_BOT` documentation and set the default template value to `false`.
+
+#### [MODIFY] [.env](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/.env)
+*   Add `ENABLE_TELEGRAM_BOT=false` to prevent background polling threads from starting automatically during local development.
+
+---
+
+## Backward Compatibility Considerations
+
+*   **API & Core Flow Stability:** The `sendBookingAlertToWorker` function checks for the presence of `bot` internally before calling `bot.sendMessage`. If the bot is disabled, the alert is skipped safely, ensuring no crash in booking creation flow.
+*   **Production Handshake:** In production environments (`NODE_ENV === 'production'`) with `ENABLE_TELEGRAM_BOT=true`, the bot will instantiate with `polling: true`, matching legacy behavior exactly and receiving Sarthi interactions.
+
+---
+
+## Verification Plan
+
+### Automated Tests
+*   Run the test runner:
+    ```bash
+    npm run test
+    ```
+*   Verify that Jest finishes all test suites (`cleanAuth.test.js`, `paymentRedirect.test.js`, `bookingStateMachine.test.js`) and terminates immediately without hanging.
+*   Confirm that no `ETELEGRAM: 409 Conflict` errors appear in the logs.
+
+### Manual Verification
+*   Start the development server with `ENABLE_TELEGRAM_BOT=false`:
+    ```bash
+    npm run dev
+    ```
+    Assert that the console prints:
+    `🤖 Telegram Alert Bot is disabled (ENABLE_TELEGRAM_BOT is not true).`
+*   Verify that API booking creations work without crashing.
+*   Start the server simulating production mode (`NODE_ENV=production` and `ENABLE_TELEGRAM_BOT=true`):
+    Assert that the bot initializes with active polling:
+    `🤖 Telegram Alert Bot initialized and polling active network...`
+
+---
+
+## Rollback Strategy
+If any runtime anomalies are encountered, use git to discard modifications on the targeted files:
+```bash
+git restore src/config/env.js src/services/telegramService.js .env.example
+```

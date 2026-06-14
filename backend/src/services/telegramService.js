@@ -1,14 +1,29 @@
 import TelegramBot from 'node-telegram-bot-api';
 import Booking from '../models/Booking.js';
 import Worker from '../models/Worker.js';
+import env from '../config/env.js';
 
-const token = process.env.TELEGRAM_BOT_TOKEN;
+const token = env.TELEGRAM_BOT_TOKEN;
+const enableTelegramBot = env.ENABLE_TELEGRAM_BOT;
+const isTest = env.NODE_ENV === 'test';
+const isCI = !!process.env.CI || !!process.env.GITHUB_ACTIONS;
+
 let bot;
 
 // Initialize bot execution safely
-if (token) {
-  bot = new TelegramBot(token, { polling: true });
-  console.log("🤖 Telegram Alert Bot initialized and polling active network...");
+if (enableTelegramBot && token) {
+  // Polling must be disabled during tests and CI/CD pipelines to prevent hanging processes
+  const shouldPoll = !isTest && !isCI;
+  
+  bot = new TelegramBot(token, { polling: shouldPoll });
+  
+  if (shouldPoll) {
+    console.log("🤖 Telegram Alert Bot initialized and polling active network...");
+  } else {
+    console.log("🤖 Telegram Alert Bot initialized in mock/non-polling mode (polling disabled).");
+  }
+} else {
+  console.log("🤖 Telegram Alert Bot is disabled (ENABLE_TELEGRAM_BOT is not true).");
 }
 
 // 1. Worker Identification registration handler (/start command)
