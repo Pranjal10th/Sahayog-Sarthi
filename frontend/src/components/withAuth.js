@@ -17,9 +17,7 @@ export default function withAuth(Component, allowedRoles = []) {
         // Mismatch role redirection logic
         if (role === 'worker') {
           try {
-            const parsedUser = JSON.parse(user || '{}');
-            const workerId = parsedUser._id || parsedUser.id;
-            router.replace(workerId ? `/workers/${workerId}/dashboard` : '/');
+            router.replace('/workers/dashboard');
           } catch (e) {
             router.replace('/');
           }

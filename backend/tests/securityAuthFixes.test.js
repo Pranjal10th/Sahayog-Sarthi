@@ -279,4 +279,153 @@ describe('Phase 3.7A Security and Auth Fixes Integration Tests', () => {
       expect(res.body.booking.status).toBe('cancelled');
     });
   });
+
+  describe('4. KYC Status Enforcements', () => {
+    let pendingWorker;
+    let rejectedWorker;
+    let approvedWorker;
+    let tokenPendingWorker;
+    let tokenRejectedWorker;
+    let tokenApprovedWorker;
+    let testBookingPending;
+    let testBookingRejected;
+    let testBookingApproved;
+
+    beforeEach(async () => {
+      // Create workers with different KYC status
+      pendingWorker = await Worker.create({
+        name: 'Pending Worker',
+        mobile: '8888880001',
+        serviceCategory: 'Electrician',
+        experience: 4,
+        hourlyRate: 150,
+        location: { type: 'Point', coordinates: [80.9462, 26.8467] },
+        kycStatus: 'pending'
+      });
+
+      rejectedWorker = await Worker.create({
+        name: 'Rejected Worker',
+        mobile: '8888880002',
+        serviceCategory: 'Electrician',
+        experience: 4,
+        hourlyRate: 150,
+        location: { type: 'Point', coordinates: [80.9462, 26.8467] },
+        kycStatus: 'rejected'
+      });
+
+      approvedWorker = await Worker.create({
+        name: 'Approved Worker',
+        mobile: '8888880003',
+        serviceCategory: 'Electrician',
+        experience: 4,
+        hourlyRate: 150,
+        location: { type: 'Point', coordinates: [80.9462, 26.8467] },
+        kycStatus: 'approved'
+      });
+
+      tokenPendingWorker = generateToken({ id: pendingWorker._id, role: 'worker' });
+      tokenRejectedWorker = generateToken({ id: rejectedWorker._id, role: 'worker' });
+      tokenApprovedWorker = generateToken({ id: approvedWorker._id, role: 'worker' });
+
+      // Create bookings assigned to each
+      testBookingPending = await Booking.create({
+        customerId: customerC._id,
+        workerId: pendingWorker._id,
+        serviceType: 'Electrician',
+        status: 'pending',
+        amount: 250,
+        customerAddress: 'Lucknow Street 4',
+        paymentStatus: 'pending'
+      });
+
+      testBookingRejected = await Booking.create({
+        customerId: customerC._id,
+        workerId: rejectedWorker._id,
+        serviceType: 'Electrician',
+        status: 'pending',
+        amount: 250,
+        customerAddress: 'Lucknow Street 4',
+        paymentStatus: 'pending'
+      });
+
+      testBookingApproved = await Booking.create({
+        customerId: customerC._id,
+        workerId: approvedWorker._id,
+        serviceType: 'Electrician',
+        status: 'pending',
+        amount: 250,
+        customerAddress: 'Lucknow Street 4',
+        paymentStatus: 'pending'
+      });
+    });
+
+    afterEach(async () => {
+      await Worker.deleteMany({ mobile: { $in: ['8888880001', '8888880002', '8888880003'] } });
+      await Booking.deleteMany({ workerId: { $in: [pendingWorker?._id, rejectedWorker?._id, approvedWorker?._id] } });
+    });
+
+    it('pending worker cannot accept booking', async () => {
+      const res = await request(app)
+        .put(`/api/v1/bookings/${testBookingPending._id}/accept`)
+        .set('Authorization', `Bearer ${tokenPendingWorker}`);
+
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe('Worker KYC approval required.');
+    });
+
+    it('rejected worker cannot accept booking', async () => {
+      const res = await request(app)
+        .put(`/api/v1/bookings/${testBookingRejected._id}/accept`)
+        .set('Authorization', `Bearer ${tokenRejectedWorker}`);
+
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe('Worker KYC approval required.');
+    });
+
+    it('pending worker cannot go online', async () => {
+      const res = await request(app)
+        .put(`/api/v1/workers/${pendingWorker._id}`)
+        .set('Authorization', `Bearer ${tokenPendingWorker}`)
+        .send({ isAvailable: true });
+
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe('Worker KYC approval required.');
+    });
+
+    it('approved worker can still work', async () => {
+      // 1. Can go online
+      const onlineRes = await request(app)
+        .put(`/api/v1/workers/${approvedWorker._id}`)
+        .set('Authorization', `Bearer ${tokenApprovedWorker}`)
+        .send({ isAvailable: true });
+
+      expect(onlineRes.status).toBe(200);
+      expect(onlineRes.body.worker.isAvailable).toBe(true);
+
+      // 2. Can accept booking
+      const acceptRes = await request(app)
+        .put(`/api/v1/bookings/${testBookingApproved._id}/accept`)
+        .set('Authorization', `Bearer ${tokenApprovedWorker}`);
+
+      expect(acceptRes.status).toBe(200);
+      expect(acceptRes.body.booking.status).toBe('accepted');
+
+      // 3. Can start booking
+      const startRes = await request(app)
+        .put(`/api/v1/bookings/${testBookingApproved._id}/start`)
+        .set('Authorization', `Bearer ${tokenApprovedWorker}`);
+
+      expect(startRes.status).toBe(200);
+      expect(startRes.body.booking.status).toBe('in_progress');
+
+      // 4. Can complete booking
+      const completeRes = await request(app)
+        .put(`/api/v1/bookings/${testBookingApproved._id}/complete`)
+        .set('Authorization', `Bearer ${tokenApprovedWorker}`);
+
+      expect(completeRes.status).toBe(200);
+      expect(completeRes.body.booking.status).toBe('completed');
+    });
+  });
 });
+

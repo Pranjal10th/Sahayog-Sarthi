@@ -2,6 +2,8 @@
 // Guard: status must be 'in_progress'.
 // Side effects: sets completedAt timestamp, socket event to booking room.
 
+import Worker from '../../../../models/Worker.js';
+
 export default class CompleteBookingUseCase {
   constructor(bookingRepository, socketAdapter) {
     this.bookingRepository = bookingRepository;
@@ -18,6 +20,13 @@ export default class CompleteBookingUseCase {
 
     if (reqUserId && booking.workerId.toString() !== reqUserId) {
       const err = new Error('Access denied. You are not the assigned worker for this booking.');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    const worker = await Worker.findById(booking.workerId);
+    if (!worker || worker.kycStatus !== 'approved') {
+      const err = new Error('Worker KYC approval required.');
       err.statusCode = 403;
       throw err;
     }

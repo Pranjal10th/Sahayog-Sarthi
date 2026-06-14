@@ -79,7 +79,11 @@ export default function Verify() {
         localStorage.setItem('user', JSON.stringify(response.data.user));
 
         alert(`🎉 OTP verified. Welcome!`);
-        router.push('/');
+        if (response.data.role === 'worker') {
+          router.push('/workers/dashboard');
+        } else {
+          router.push('/');
+        }
       }
     } catch (err) {
       setError(err.response?.data?.error || 'Verification failed. Please try again.');

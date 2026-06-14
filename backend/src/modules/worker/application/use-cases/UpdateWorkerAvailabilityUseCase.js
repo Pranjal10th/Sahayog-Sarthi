@@ -22,6 +22,12 @@ export default class UpdateWorkerAvailabilityUseCase {
       throw err;
     }
 
+    if (updateData.isAvailable === true && existing.kycStatus !== 'approved') {
+      const err = new Error('Worker KYC approval required.');
+      err.statusCode = 403;
+      throw err;
+    }
+
     const updated = await this.workerRepository.updateById(workerId, { $set: updateData });
     if (!updated) throw new Error('Worker profile not found during update.');
     return updated;

@@ -47,6 +47,11 @@ export default class AcceptBookingUseCase {
       err.statusCode = 403;
       throw err;
     }
+    if (worker.kycStatus !== 'approved') {
+      const err = new Error('Worker KYC approval required.');
+      err.statusCode = 403;
+      throw err;
+    }
 
     booking.status = 'accepted';
     await booking.save();
