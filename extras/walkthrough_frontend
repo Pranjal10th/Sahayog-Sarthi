@@ -1,0 +1,181 @@
+# Sahayog Sarthi – Operations & Onboarding System Walkthrough
+
+This document outlines the design, implementation, and verification logs for Phase 0 through Phase 3.1, covering the backend Clean Architecture Auth module, frontend auth experience, database optimizations, and the core booking state machine.
+
+---
+
+## Part A: Phase 0 & Phase 1 Walkthrough (Core Architecture & APIs)
+
+### 1. Files Created & Modified (Phase 0 & 1)
+
+#### Created Files
+- [backend/data/policies.json](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/data/policies.json): Static JSON policies (cancellation, refunds, safety, codes of conduct).
+- [backend/data/services.json](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/data/services.json): Scope of work, base rates, and descriptions of categories.
+- [backend/data/pricing.json](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/data/pricing.json): Platform fees, base rates, hourly structures, and night surges.
+- [backend/tests/paymentRedirect.test.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/tests/paymentRedirect.test.js): Integration test suite verifying order creation, checkout verification, wallet updates, and payout withdrawals.
+
+#### Modified Files
+- [backend/src/models/Payment.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/Payment.js): Replaced duplicate express router structure with standard Mongoose Payment schema.
+- [backend/src/controllers/paymentController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/paymentController.js): Implemented Razorpay sandbox order/verify logging and withdrawal logic.
+- [backend/src/controllers/workerController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/workerController.js): Implemented individual admin endpoints for approving, rejecting, blocking, and unblocking Sarthis.
+- [backend/src/routes/worker.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/routes/worker.js): Registered explicit KYC routes and the administrative overview query console.
+- [backend/src/controllers/bookingController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/bookingController.js): Implemented methods for cancels, starts, booking IDs, and customer history logs.
+- [backend/src/routes/booking.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/routes/booking.js): Wired new endpoint logic and session token validation middleware.
+- [backend/src/routes/payment.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/routes/payment.js): Connected the wallet payout withdrawal endpoint.
+- [backend/package.json](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/package.json): Added test execution commands.
+- [frontend/src/pages/payment/[bookingId].js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/frontend/src/pages/payment/%5BbookingId%5D.js): Synchronized payment completion redirection query parameters.
+- [frontend/src/pages/admin/index.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/frontend/src/pages/admin/index.js): Replaced fallback sandbox mock states with live API console triggers.
+
+---
+
+## Part B: Phase 2 Walkthrough (Database Indexes & Booking State Machine)
+
+### 1. Files Created & Modified (Phase 2)
+
+#### Created Files
+- [backend/tests/bookingStateMachine.test.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/tests/bookingStateMachine.test.js): Integration test suite covering state machine constraints, blocked worker validations, and cancellations.
+
+#### Modified Files
+- [backend/src/models/Booking.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/Booking.js): Added compound indexes and integrated the `'paid'` state + `metadata` dictionary.
+- [backend/src/models/Review.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/Review.js): Indexed consumer and Sarthi fields to accelerate feedback loading.
+- [backend/src/models/Chat.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/Chat.js): Defined chronological message tracking indexes.
+- [backend/src/models/Payment.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/Payment.js): Set `razorpayOrderId` as a sparse unique index and added ledger search indexes.
+- [backend/src/controllers/bookingController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/bookingController.js): Implemented strict transition guards on booking lifecycle changes, and wrapped all Socket.io emissions in try/catch blocks.
+- [backend/src/controllers/paymentController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/paymentController.js): Blocked payment verification on non-completed bookings and transitioned status to `paid` upon success.
+- [backend/src/controllers/workerController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/workerController.js): Prevented blocked workers from setting their profile to online/available.
+
+### 2. Database Indexes Created
+
+| Collection | Index Fields | Usage / Optimized Query Pattern |
+| :--- | :--- | :--- |
+| **bookings** | `{ customerId: 1, createdAt: -1 }` | Paginated booking history lists for customers |
+| **bookings** | `{ workerId: 1, createdAt: -1 }` | Sarthi dashboard transaction feeds |
+| **bookings** | `{ workerId: 1, status: 1 }` | Active booking queries (accepted & in_progress) |
+| **bookings** | `{ status: 1, createdAt: -1 }` | Admin operations panel listings |
+| **reviews** | `{ workerId: 1 }` | Sarthi profile review aggregates and average ratings |
+| **reviews** | `{ customerId: 1 }` | Customer feedback logs |
+| **chats** | `{ bookingId: 1, timestamp: 1 }` | Chronological chat history loading in the tracker page |
+| **payments** | `{ workerId: 1, createdAt: -1 }` | Sarthi wallet withdrawal transaction logs |
+| **payments** | `{ razorpayOrderId: 1 }` | Unique sparse index to accelerate checkout validation |
+
+---
+
+## Part C: Phase 3.1 Walkthrough (Backend Clean Auth Refactoring)
+
+### 1. Architectural Layout (Clean Architecture)
+We migrated the Auth module to a Hexagonal / Clean Architecture structure while keeping full backward compatibility via Proxy Wrappers:
+
+```text
+backend/src/modules/auth/
+├── domain/                          # Pure Enterprise/Domain Rules
+│   ├── entities/User.js             # User aggregate root
+│   └── value-objects/MobileNumber.js# Validate 10-digit format
+├── application/                     # Application Business Logic
+│   ├── ports/                       # Interfaces (Repositories, SMS, Tokens)
+│   └── use-cases/                   # SendOtp, VerifyOtp, RegisterWorker
+└── infrastructure/                  # Adapters (Mongoose, JWT, Sms, DI)
+    ├── persistence/                 # schemas/UserSchema, repositories
+    ├── services/                    # JwtTokenService, SmsService, InMemoryOtpStore
+    └── di/container.js              # Awilix Dependency Injection config
+```
+
+### 2. Proxy Wrappers (Legacy Interop)
+- **[backend/src/models/User.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/User.js):** Proxy schema routing MongoDB queries to the new `UserSchema` to prevent duplication conflicts.
+- **[backend/src/services/authService.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/services/authService.js):** Reroutes use cases (`sendOtp`, `verifyOtp`, `registerWorker`) directly to the Clean Architecture container.
+- **[backend/src/routes/auth.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/routes/auth.js):** Proxies incoming API endpoints to the DI-wired controller.
+
+---
+
+## Part D: Phase 3.1 Walkthrough (Frontend Authentication Integration)
+
+We implemented a premium, fully secured authentication and onboarding experience in the Next.js frontend, directly consuming the Phase 3.1 Auth module APIs.
+
+### 1. Pages Integrated
+- **[frontend/src/pages/auth/login.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/frontend/src/pages/auth/login.js):** 10-digit mobile number entry utilizing premium slate/deep-blue glassmorphic card stylings. Displays session-expiration warning banners.
+- **[frontend/src/pages/auth/verify.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/frontend/src/pages/auth/verify.js):** 6-digit OTP code entry with auto-shifting focus indicators. Includes a 30s development countdown resend timer and an inline customer registration name uploader modal.
+- **[frontend/src/pages/auth/register-worker.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/frontend/src/pages/auth/register-worker.js):** Multi-step worker onboarding wizard. Geolocation permissions capture coordinates dynamically; fallbacks Lucknow coordinates `[80.9462, 26.8467]` if access is denied.
+
+### 2. Route Guards & Security
+- **[frontend/src/components/withAuth.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/frontend/src/components/withAuth.js):** HOC (Higher-Order Component) checking localStorage session `token` and `role`. Displays an animated premium loading state to prevent screen flashing, and implements automatic role mismatch redirection.
+- **[frontend/src/pages/_app.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/frontend/src/pages/_app.js):** Configures Axios request and response interceptors to inject authorization headers automatically and redirect 401 token expiry errors to `/auth/login?expired=true`.
+- **Protected Pages:**
+  - `Admin Control Panel` (`/admin`) ➔ Enforced role: `['admin']`
+  - `Worker Dashboard` (`/workers/dashboard`) ➔ Enforced role: `['worker']`
+  - `Worker Booking Detail` (`/workers/[id]`) ➔ Enforced role: `['customer']`
+  - `Booking Tracker` (`/bookings/[id]`) ➔ Enforced role: `['customer', 'worker']`
+  - `Payment Checkout` (`/payment/[bookingId]`) ➔ Enforced role: `['customer']`
+
+### 3. Logout Integration
+Wired explicit localStorage cleanup and state resets returning to the `/auth/login` redirect route upon logout across:
+- **Central Admin Control Header** (`frontend/src/pages/admin/index.js`)
+- **Sarthi DashboardDuty duty widgets** (`frontend/src/pages/workers/dashboard.js`)
+- **Dynamic Main Header Navbar** (`frontend/src/pages/index.js`)
+
+---
+
+## Part E: Test Verification Suite Logs
+
+All automated backend integration tests are verified and passing 100%:
+
+### 1. Clean Architecture Auth Tests (`tests/cleanAuth.test.js`)
+```text
+PASS tests/cleanAuth.test.js
+  Clean Architecture Auth Module Integration Tests (Phase 3.1)
+    POST /api/v1/auth/send-otp
+      √ should fail if mobile is missing or not 10 digits (103 ms)
+      √ should succeed to simulate OTP sending for a valid 10-digit mobile number (27 ms)
+    POST /api/v1/auth/verify-otp
+      √ should fail if mobile or OTP is missing (16 ms)
+      √ should fail if OTP is incorrect (61 ms)
+      √ should return newCustomer flag if OTP verified but user does not exist and no name is provided (59 ms)
+      √ should register and return token + customer if OTP is verified, user does not exist, and name is provided (69 ms)
+      √ should login and return token + customer if user already exists (34 ms)
+    POST /api/v1/auth/register/worker
+      √ should fail if missing mandatory fields (11 ms)
+      √ should register a new worker successfully and return JWT token (56 ms)
+      √ should fail if worker mobile already exists (12 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       10 passed, 10 total
+Snapshots:   0 total
+Time:        2.458 s, estimated 3 s
+```
+
+### 2. Payment Redirect & Ledger Tests (`tests/paymentRedirect.test.js`)
+```text
+PASS tests/paymentRedirect.test.js
+  Sahayog Sarthi Phase 1 Integration Tests
+    √ POST /api/v1/payments/create-order should generate Order and Payment schema document log (75 ms)
+    √ POST /api/v1/payments/verify should process Sandbox verification & top-up Sarthi wallet balance (101 ms)
+    √ PUT /api/v1/workers/:id/approve and reject/block should work correctly (186 ms)
+    √ POST /api/v1/payments/withdraw should process worker withdrawals (48 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       4 passed, 4 total
+Snapshots:   0 total
+Time:        2.918 s, estimated 3 s
+```
+
+### 3. Booking State Machine Transitions (`tests/bookingStateMachine.test.js`)
+```text
+PASS tests/bookingStateMachine.test.js
+  Sahayog Sarthi Booking State Machine Integration Tests
+    1. Valid Lifecycle Transitions
+      √ Should execute full lifecycle: pending -> accepted -> in_progress -> completed -> paid (354 ms)
+    2. Alternative Cancellation Paths
+      √ Should allow pending -> cancelled transition without penalty fee (31 ms)
+      √ Should allow accepted -> cancelled transition and track Rs.50 metadata fee without deducting balance (40 ms)
+    3. Blocked Worker Validation Constraints
+      √ Blocked worker cannot accept a booking (55 ms)
+      √ Blocked worker cannot modify profile to go online/available (24 ms)
+    4. Invalid Transitions (guards)
+      √ Should fail if starting booking from pending (not accepted) (16 ms)
+      √ Should fail if completing booking from accepted (not in_progress) (24 ms)
+      √ Should fail if verifying payment signature on non-completed booking (23 ms)
+      √ Should fail if cancelling a completed booking (34 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       9 passed, 9 total
+Snapshots:   0 total
+Time:        2.813 s, estimated 5 s
+```

@@ -1,0 +1,144 @@
+# Frontend Authentication Experience Proposal (Sahayog Sarthi)
+
+This proposal details the UI/UX design, flow architecture, routing layout, and integration strategy to complete the frontend authentication experience for Sahayog Sarthi, interfacing directly with the refactored Clean Architecture Auth module.
+
+---
+
+## 1. UI/UX Page Designs
+
+### 1.1 Login Page (`/auth/login`)
+A premium, mobile-first card interface utilizing a clean, modern color scheme (glassmorphic cards, HSL tailored deep blues, soft slate grays) and modern typography (e.g., Google Fonts `Inter` or `Outfit`).
+
+*   **Header Section:** Clean app logo and name with a subtitle: *"Verified skilled professionals at your doorstep."*
+*   **Form Input:** A single, clean numeric text field for the 10-digit mobile number with prefix flag (+91) and inline validation.
+*   **Interactives:** 
+    *   Large CTA button: *"Get OTP"* with hover animations and disabled state when the mobile number is not exactly 10 digits.
+    *   Links to register as a service provider (Sarthi) at the bottom: *"Earn as a Sarthi? Register Here"* directing to the worker register page.
+
+### 1.2 OTP Verification Page (`/auth/verify`)
+A screen to enter the 6-digit OTP code received by the user.
+
+*   **Inputs:** A row of 6 single-digit square input boxes. Auto-focus shifts to the next input box automatically as numbers are typed (with backward deletion support).
+*   **Verify CTA:** A primary button *"Verify OTP"* with a loading spinner.
+*   **Resend Gate:** A soft-colored countdown timer starting at `02:00` minutes. The *"Resend OTP"* button remains disabled until the countdown hits `00:00`, preventing API rate limit abuse.
+*   **Error State:** Red animated micro-error prompts if the validation yields an invalid or expired code.
+
+---
+
+## 2. Onboarding Flows
+
+```mermaid
+flowchart TD
+    A[Start: /auth/login] --> B[Enter 10-digit Mobile]
+    B --> C[Hit /send-otp]
+    C --> D[Redirect to /auth/verify]
+    D --> E[Enter 6-digit OTP & verify]
+    E --> F{New Customer?}
+    F -- Yes --> G[Redirect to /auth/register-customer]
+    G --> H[Enter Name & Email]
+    H --> I[Submit to verify-otp with Name]
+    I --> J[Save Token & Redirect to /]
+    F -- No --> K[Redirect to dashboard / home]
+```
+
+### 2.1 Customer Onboarding
+1.  User enters mobile and OTP.
+2.  If the backend `/verify-otp` response contains `{ newCustomer: true }`:
+    *   Frontend redirects the user to `/auth/register-customer`.
+    *   Presents a profile card requesting the user's **Name** and optional **Email**.
+    *   Submitting the profile sends the payload `{ name, mobile, otp }` to the `/verify-otp` route, creating the Mongoose document and returning the session token.
+3.  Token is stored, and the user is redirected to the homepage `/`.
+
+### 2.2 Worker Onboarding (`/auth/register-worker`)
+A clean multi-step onboarding wizard to guide sarthis during registration:
+
+*   **Step 1: Account Information:** Full name, 10-digit mobile number, service category dropdown (Electrician, Plumber, etc.), and experience (in years).
+*   **Step 2: Pricing & Location:**
+    *   Hourly rate (in ₹).
+    *   **GPS Coordinate Capture:** Integrated with the browser's `navigator.geolocation` API to auto-fetch coordinates, alongside editable longitude/latitude manual entries as a fallback.
+*   **Step 3: KYC Document Upload:**
+    *   Drag-and-drop file uploader (supports PDF, JPG, and PNG up to 5MB, up to 3 files).
+*   **Submission:** Hits `/api/v1/auth/register/worker` and uploads the details. Once completed, redirects to `/workers/dashboard`.
+
+---
+
+## 3. Frontend Route Structure
+
+All authentication related screens will reside under the `/src/pages/auth/` directory:
+
+```text
+frontend/src/pages/
+└── auth/
+    ├── login.js                     # Enter mobile number
+    ├── verify.js                    # OTP input page with timer
+    ├── register-customer.js         # Collect Name/Email for new customers
+    └── register-worker.js           # Multi-step Sarthi onboarding form
+```
+
+---
+
+## 4. JWT & State Storage Strategy
+
+*   **Storage Target:** `localStorage` is used to persist the signed JWT token (`token`) and basic profile meta-object (`user`, `role`) across tab closures.
+*   **Axios Interceptor:** An Axios HTTP client instance is configured to automatically attach the header:
+    ```javascript
+    config.headers.Authorization = `Bearer ${localStorage.getItem('token')}`;
+    ```
+    to authorize all outgoing REST requests.
+*   **State Management:** An `AuthContext` React Provider wraps the application root (`_app.js`) to provide reactive access to states like `currentUser`, `role`, and `isAuthenticated`.
+
+---
+
+## 5. Protected Routes Strategy (HOC Guards)
+
+To protect sensitive pages (like booking details or worker dashboards), we will introduce a Higher-Order Component `withAuth`:
+
+```javascript
+// frontend/src/components/withAuth.js
+import { useEffect } from 'react';
+import { useRouter } from 'next/router';
+
+export default function withAuth(Component, allowedRoles = []) {
+  return function AuthenticatedComponent(props) {
+    const router = useRouter();
+
+    useEffect(() => {
+      const token = localStorage.getItem('token');
+      const role = localStorage.getItem('role');
+
+      if (!token) {
+        router.replace('/auth/login');
+      } else if (allowedRoles.length > 0 && !allowedRoles.includes(role)) {
+        router.replace('/');
+      }
+    }, [router]);
+
+    return <Component {...props} />;
+  };
+}
+```
+
+*   **Application:** Apply this wrapper to protect page exports:
+    *   `dashboard.js` ➔ `export default withAuth(WorkerDashboard, ['worker']);`
+    *   `bookings/index.js` ➔ `export default withAuth(BookingsPage, ['customer', 'admin']);`
+
+---
+
+## 6. Logout Flow
+
+*   **Triggers:** User clicks *"Logout"* button inside navigation bars.
+*   **Operations:**
+    *   Remove `token`, `user`, and `role` entries from `localStorage`.
+    *   Set `currentUser` to `null` and `isAuthenticated` to `false` in `AuthContext`.
+    *   Force a page redirection to the public landing page `/`.
+
+---
+
+## 7. Integration Summary with the backend Auth Module
+
+| Page | Trigger Actions | Backend Route Called | Payload | Expected Response |
+| :--- | :--- | :--- | :--- | :--- |
+| `/auth/login` | Click "Get OTP" | `POST /api/v1/auth/send-otp` | `{ mobile }` | `{ success: true, message: "..." }` |
+| `/auth/verify` | Submit OTP | `POST /api/v1/auth/verify-otp` | `{ mobile, otp }` | `{ token, user, role }` or `{ newCustomer: true }` |
+| `/auth/register-customer` | Submit profile name | `POST /api/v1/auth/verify-otp` | `{ mobile, otp, name }` | `{ token, user, role }` |
+| `/auth/register-worker` | Submit multi-step form | `POST /api/v1/auth/register/worker` | Multi-field JSON or multipart form | `{ token, worker, role }` |

@@ -1,0 +1,169 @@
+# Frontend Authentication Experience Proposal (Sahayog Sarthi) - Revised
+
+This proposal details the UI/UX design, flow architecture, routing layout, security policies, and integration strategy to complete the frontend authentication experience for Sahayog Sarthi, interfacing directly with the backend Clean Architecture Auth module.
+
+---
+
+## 1. UI/UX Page & View Designs
+
+### 1.1 Login Page (`/auth/login`)
+A premium, mobile-first card interface utilizing a clean, modern color scheme (glassmorphic cards, HSL tailored deep blues, soft slate grays) and modern typography (e.g., Google Fonts `Inter` or `Outfit`).
+
+*   **Header Section:** Clean app logo and name with a subtitle: *"Verified skilled professionals at your doorstep."*
+*   **Form Input:** A single, clean numeric text field for the 10-digit mobile number with prefix flag (+91) and inline validation.
+*   **Interactives:** 
+    *   Large CTA button: *"Get OTP"* with hover animations and disabled state when the mobile number is not exactly 10 digits.
+    *   Links to register as a service provider (Sarthi) at the bottom: *"Earn as a Sarthi? Register Here"* directing to the worker register page.
+
+### 1.2 OTP Verification Page (`/auth/verify`)
+A screen to enter the 6-digit OTP code received by the user.
+
+*   **Inputs:** A row of 6 single-digit square input boxes. Auto-focus shifts to the next input box automatically as numbers are typed (with backward deletion support).
+*   **Verify CTA:** A primary button *"Verify OTP"* with a loading spinner.
+*   **Resend Gate:** A soft-colored countdown timer starting at `02:00` minutes. The *"Resend OTP"* button remains disabled until the countdown hits `00:00`, preventing API rate limit abuse.
+*   **Error State:** Red animated micro-error prompts if the validation yields an invalid or expired code.
+
+---
+
+## 2. Onboarding Flows
+
+### 2.1 Customer Onboarding: Inline Profile Completion Modal
+To reduce friction and minimize user drop-offs, the customer onboarding flow will utilize an **inline profile completion modal** directly on the OTP verification screen instead of redirecting the user to a dedicated page.
+
+```mermaid
+flowchart TD
+    A[Start: /auth/login] --> B[Enter 10-digit Mobile]
+    B --> C[Hit /send-otp]
+    C --> D[Redirect to /auth/verify]
+    D --> E[Enter 6-digit OTP & verify]
+    E --> F{New Customer?}
+    F -- Yes --> G[Trigger Inline Profile Modal]
+    G --> H[Enter Name]
+    H --> I[Submit to verify-otp with Name]
+    I --> J[Save Token & Redirect to /]
+    F -- No --> K[Save Token & Redirect to Dashboard / Home]
+```
+
+1.  User enters mobile and OTP.
+2.  If the backend `/verify-otp` response indicates a new customer (`{ newCustomer: true }`):
+    *   The OTP entry boxes fade out, and a modal slides in on the same screen: *"Welcome to Sahayog Sarthi! Please tell us your name to complete your profile."*
+    *   The user types their name and clicks "Complete Profile".
+    *   The frontend sends the registration call `POST /api/v1/auth/verify-otp` containing `{ mobile, otp, name }` to create the Mongoose document.
+3.  Upon success, the token is saved, and the user is redirected to the homepage `/`.
+
+### 2.2 Worker Onboarding (`/auth/register-worker`)
+A clean multi-step onboarding wizard to guide sarthis during registration:
+
+*   **Step 1: Account Details:** Full name, 10-digit mobile number, service category dropdown (Electrician, Plumber, etc.), and experience (in years).
+*   **Step 2: Pricing & Geolocation (Optional):**
+    *   Hourly rate (in ₹).
+    *   **Optional GPS Capture:** The app requests browser geolocation permissions. 
+        *   *If allowed:* Coordinates are auto-populated.
+        *   *If blocked/declined:* The coordinates are set to a default fallback coordinate (e.g. center of Lucknow `[80.9462, 26.8467]`) and the onboarding flow proceeds without errors.
+*   **Step 3: KYC Document Upload:**
+    *   Drag-and-drop file uploader (supports PDF, JPG, and PNG up to 5MB, up to 3 files).
+*   **Submission:** Hits `/api/v1/auth/register/worker` and uploads the details. Once completed, redirects to `/workers/dashboard`.
+
+---
+
+## 3. Frontend Route Structure
+
+All authentication related screens will reside under the `/src/pages/auth/` directory:
+
+```text
+frontend/src/pages/
+└── auth/
+    ├── login.js                     # Enter mobile number
+    ├── verify.js                    # OTP input + Inline Customer Modal
+    └── register-worker.js           # Multi-step Sarthi onboarding wizard
+```
+
+---
+
+## 4. Security & Storage Policies
+
+### 4.1 JWT Storage Policy
+*   **Current Strategy:** Store the signed JWT token (`token`) and profile meta-object (`user`, `role`) in `localStorage` for cross-tab persistence and simple configuration.
+*   **Axios Interceptor:** An Axios HTTP client instance is configured to automatically attach the header:
+    ```javascript
+    config.headers.Authorization = `Bearer ${localStorage.getItem('token')}`;
+    ```
+
+> [!WARNING]
+> **Security Recommendation:** `localStorage` is vulnerable to Cross-Site Scripting (XSS) attacks. In a subsequent production hardening phase, the session token storage should be migrated to **HttpOnly secure cookies**, managed on the server side so that client scripts cannot access the token.
+
+### 4.2 Token Expiry & Auto Re-Authentication
+Since tokens are signed with a `7d` expiry, the frontend must handle expiration gracefully:
+*   An Axios response interceptor is registered globally:
+    ```javascript
+    axios.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (error.response && error.response.status === 401) {
+          // Token is invalid or expired
+          localStorage.clear();
+          window.location.href = '/auth/login?expired=true';
+        }
+        return Promise.reject(error);
+      }
+    );
+    ```
+*   When redirected to `/auth/login?expired=true`, the login screen displays a user-friendly info banner: *"Your session has expired. Please log in again using OTP."*
+
+---
+
+## 5. Protected Routes Strategy (Role-Based Guards)
+
+To protect sensitive routes, a Higher-Order Component (HOC) `withAuth` validates user permissions against three roles: `customer`, `worker`, and `admin`.
+
+```javascript
+// frontend/src/components/withAuth.js
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/router';
+
+export default function withAuth(Component, allowedRoles = []) {
+  return function AuthenticatedComponent(props) {
+    const router = useRouter();
+    const [verified, setVerified] = useState(false);
+
+    useEffect(() => {
+      const token = localStorage.getItem('token');
+      const role = localStorage.getItem('role');
+
+      if (!token) {
+        router.replace('/auth/login');
+      } else if (allowedRoles.length > 0 && !allowedRoles.includes(role)) {
+        // Role mismatch - redirect to their default dashboards
+        if (role === 'worker') {
+          const workerId = JSON.parse(localStorage.getItem('user'))?._id;
+          router.replace(`/workers/${workerId}/dashboard`);
+        } else if (role === 'admin') {
+          router.replace('/admin/overview');
+        } else {
+          router.replace('/');
+        }
+      } else {
+        setVerified(true);
+      }
+    }, [router]);
+
+    if (!verified) return null; // Prevent UI flashing before auth verification
+    return <Component {...props} />;
+  };
+}
+```
+
+### Protection Mappings:
+*   **Worker Dashboard** (`/src/pages/workers/[id]/dashboard.js`) ➔ protected for `['worker']`
+*   **Admin Dashboard** (`/src/pages/admin/overview.js`) ➔ protected for `['admin']`
+*   **Booking History** (`/src/pages/bookings/history.js`) ➔ protected for `['customer']`
+
+---
+
+## 6. Logout Flow
+
+*   **Trigger:** User clicks *"Logout"* in the sidebar or navbar.
+*   **Operations:**
+    1.  Clear all auth data from client cache: `localStorage.removeItem('token')`, `localStorage.removeItem('user')`, `localStorage.removeItem('role')`.
+    2.  Set `currentUser` to `null` and `isAuthenticated` to `false` in global React Context.
+    3.  Redirect to the home landing page `/` (or `/auth/login`).
