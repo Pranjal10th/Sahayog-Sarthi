@@ -1,0 +1,351 @@
+# Phase 3.3: Booking Module Migration Plan
+
+## Goal
+
+Migrate the Booking module to Clean Architecture using the proven copy-first strategy from Phase 3.2.  
+The booking state machine, payment cross-dependency, real-time socket events, Telegram alerts, chat, and reminder timer must all remain **functionally identical** throughout and after migration.
+
+---
+
+## 1. Dependency Analysis
+
+### 1.1 Direct Importers of `models/Booking.js`
+
+| File | Role |
+|---|---|
+| `src/controllers/bookingController.js` | Core CRUD + state machine (7 actions) |
+| `src/controllers/paymentController.js` | Reads booking for order creation + verifies status before wallet settlement |
+| `src/controllers/review.js` | Reads booking to validate `status === 'completed'` before accepting a review |
+| `src/services/telegramService.js` | Reads booking to dispatch Telegram alert on new booking |
+| `src/services/reminderService.js` | Reads and writes booking during 60s auto-timeout |
+| `src/modules/worker/infrastructure/persistence/repositories/MongoBookingRepository.js` | Dashboard: active bookings for worker |
+| `src/modules/worker/infrastructure/persistence/repositories/MongoPaymentRepository.js` | Dashboard: payment lookup by booking IDs |
+| `tests/bookingStateMachine.test.js` | 14 state machine integration tests |
+| `tests/paymentRedirect.test.js` | Payment flow integration tests |
+| `backend/scratch/*` | Verification scripts (non-production) |
+| `backend/inspectDb.js` | DB inspection script (non-production) |
+
+### 1.2 Direct Importers of `routes/booking.js`
+
+| File | Role |
+|---|---|
+| `src/index.js` | Mounts at `/api/v1/bookings` |
+| `tests/bookingStateMachine.test.js` | Builds test Express app with legacy routes |
+| `tests/paymentRedirect.test.js` | Builds test Express app with legacy routes |
+
+### 1.3 Direct Importers of `controllers/bookingController.js`
+
+| File | Role |
+|---|---|
+| `src/routes/booking.js` | Binds all 7 booking action handlers to routes |
+
+### 1.4 Indirect Dependencies
+
+```
+bookingController.js
+├── models/Booking.js              ← state machine persisted here
+├── models/Worker.js               ← blocked worker guard in acceptBooking
+├── services/socketService.js      ← emits 5 distinct booking events
+├── services/telegramService.js    ← sendBookingAlertToWorker on createBooking
+└── [in-memory] activeBookingTimers Map   ← 60s auto-cancel timer
+
+paymentController.js
+├── models/Booking.js              ← booking status gate for payment
+├── models/Worker.js               ← wallet $inc on settlement
+└── models/Payment.js              ← creates payment records
+
+review.js
+├── models/Booking.js              ← completed status gate for review
+├── models/Worker.js               ← aggregates rating after review
+└── models/Review.js
+
+reminderService.js
+├── models/Booking.js              ← auto-cancels if status still pending at T+60s
+└── services/socketService.js      ← broadcasts timeout event to booking room
+
+routes/booking.js
+├── controllers/bookingController.js     ← 7 action exports
+├── controllers/chatController.js        ← getChatHistory on /chats/:id
+└── middlewares/validationMiddleware.js  ← validateBookingCreation chain
+```
+
+---
+
+## 2. State Machine Map
+
+The booking state machine is the highest-risk component. All valid transitions must be preserved exactly:
+
+```
+pending ──(accept)──► accepted ──(start)──► in_progress ──(complete)──► completed ──(payment)──► paid
+   │                     │
+   └──(cancel)──► cancelled ◄──(cancel)──┘
+   │
+   └──(auto-timeout at T+60s)──► cancelled
+```
+
+### State Transition Guards (must not change)
+
+| Transition | From | To | Guard |
+|---|---|---|---|
+| accept | `pending` | `accepted` | Worker must not be blocked |
+| start | `accepted` | `in_progress` | No additional guard |
+| complete | `in_progress` | `completed` | No additional guard |
+| cancel (no fee) | `pending` | `cancelled` | Clears active timer |
+| cancel (fee) | `accepted` | `cancelled` | Records `metadata.cancellationFee = {amount: 50}` |
+| auto-timeout | `pending` | `cancelled` | Triggered by 60s in-memory timer |
+| payment verify | `completed` | `paid` + `paymentStatus: paid` | `status === 'completed'` strict check |
+
+### Side Effects Per Transition (must not change)
+
+| Transition | Socket Event | Telegram | Timer |
+|---|---|---|---|
+| create | `booking:new` → worker socketId | `sendBookingAlertToWorker` | Start 60s countdown |
+| accept | `booking:accepted` → customer socketId | — | Cancel countdown |
+| start | `booking:started` → `booking_{id}` room | — | — |
+| complete | `booking:completed` → `booking_{id}` room | — | — |
+| cancel | `booking:cancelled` → `booking_{id}` room | — | Cancel countdown if pending |
+| auto-timeout | `booking:timeout` → `booking_{id}` room | — | Self-clears |
+
+---
+
+## 3. File Inventory — All Affected Files
+
+### Phase A: New Files to Create (copy-first)
+
+```
+backend/src/modules/booking/
+├── domain/
+│   └── entities/
+│       └── Booking.js                      [NEW] Pure domain entity
+├── application/
+│   ├── ports/
+│   │   ├── BookingRepositoryPort.js        [NEW] Repository interface
+│   │   ├── NotificationPort.js             [NEW] Socket + Telegram interface
+│   │   └── TimerPort.js                    [NEW] Timeout scheduler interface
+│   └── use-cases/
+│       ├── CreateBookingUseCase.js          [NEW] + socket + telegram + timer
+│       ├── AcceptBookingUseCase.js          [NEW] + worker blocked guard + socket
+│       ├── StartBookingUseCase.js           [NEW] + socket
+│       ├── CompleteBookingUseCase.js        [NEW] + socket
+│       ├── CancelBookingUseCase.js          [NEW] + fee logic + socket + timer cancel
+│       ├── GetBookingByIdUseCase.js         [NEW] + populate customerId + workerId
+│       └── GetBookingHistoryUseCase.js      [NEW] + paginated + role filter
+├── infrastructure/
+│   ├── persistence/
+│   │   └── schemas/
+│   │       └── BookingSchema.js            [NEW] Canonical schema (idempotent guard)
+│   ├── adapters/
+│   │   ├── SocketNotificationAdapter.js    [NEW] Implements NotificationPort
+│   │   ├── TelegramNotificationAdapter.js  [NEW] Implements NotificationPort (Telegram)
+│   │   └── InMemoryTimerAdapter.js         [NEW] Implements TimerPort
+│   ├── repositories/
+│   │   └── MongoBookingRepository.js       [NEW] Full CRUD + populate
+│   └── di/
+│       └── container.js                    [NEW] Full DI wiring
+└── interfaces/
+    └── http/
+        ├── controllers/
+        │   └── BookingController.js        [NEW] Clean HTTP controller
+        └── routes/
+            └── bookingRoutes.js            [NEW] Mirrors legacy routing structure
+```
+
+### Phase B: Verification Only (no changes)
+
+```
+backend/scratch/populateVerifyBooking.js    [NEW] Verify populate workerId + customerId
+```
+
+### Phase C: Proxy Wrappers (one-line re-exports)
+
+```
+backend/src/models/Booking.js              [MODIFY] Proxy → BookingSchema.js
+```
+
+### Preserved Without Modification
+
+```
+backend/src/controllers/bookingController.js   [KEEP — untouched until Phase D]
+backend/src/routes/booking.js                  [KEEP — untouched until Phase D]
+backend/src/services/reminderService.js        [KEEP — referenced by bookingController]
+backend/src/services/socketService.js          [KEEP — used via adapter]
+backend/src/services/telegramService.js        [KEEP — used via adapter]
+backend/src/controllers/chatController.js      [KEEP — mounted on booking routes]
+backend/src/middlewares/validationMiddleware.js [KEEP — reused in clean routes]
+```
+
+---
+
+## 4. Dependency Graph (Visual)
+
+```
+index.js
+└── routes/booking.js  ←────────────────────────── LEGACY (stays active)
+    ├── bookingController.js
+    │   ├── models/Booking.js  ←──────────────────── PROXY → BookingSchema.js (Phase C)
+    │   ├── models/Worker.js   ←──────────────────── already proxied (Phase 3.2 ✅)
+    │   ├── socketService.js
+    │   └── telegramService.js
+    └── chatController.js
+        └── models/Chat.js
+
+src/modules/booking/          ←────────────────────── NEW CLEAN MODULE (Phase A)
+    └── interfaces/http/routes/bookingRoutes.js
+        └── BookingController.js
+            └── use-cases/* (DI injected)
+                ├── MongoBookingRepository.js → BookingSchema.js (same collection)
+                ├── SocketNotificationAdapter.js → socketService.js
+                ├── TelegramNotificationAdapter.js → telegramService.js
+                └── InMemoryTimerAdapter.js (own timer map)
+
+paymentController.js
+    └── models/Booking.js  ←──────────────── PROXY → BookingSchema.js (Phase C)
+
+review.js
+    └── models/Booking.js  ←──────────────── PROXY → BookingSchema.js (Phase C)
+
+reminderService.js
+    └── models/Booking.js  ←──────────────── PROXY → BookingSchema.js (Phase C)
+
+tests/bookingStateMachine.test.js
+    ├── models/Booking.js  ←──────────────── PROXY → BookingSchema.js (Phase C)
+    └── routes/booking.js  ←──────────────── LEGACY routes (still active)
+```
+
+---
+
+## 5. Risk Assessment
+
+| Risk | Severity | Affected Component | Mitigation |
+|---|---|---|---|
+| State machine transition logic divergence | 🔴 CRITICAL | All 7 use cases | Port identical guard logic; keep tests covering legacy routes throughout |
+| 60s timer duplication | 🔴 HIGH | `InMemoryTimerAdapter` vs `bookingController` in-memory Map | Clean module has its own Map; legacy map remains. Both coexist — no conflict since clean routes are not yet served by `index.js` |
+| `Booking.populate()` referencing wrong model name | 🟡 MEDIUM | `BookingSchema.js` model name | Use `mongoose.models.Booking \|\| mongoose.model('Booking', ...)` — same pattern as Worker |
+| Socket event contract changes | 🟡 MEDIUM | Frontend WebSocket listeners | Adapter wraps same `socketService.js` — event names and payloads are copied verbatim |
+| Telegram hardcoded chat ID | 🟡 MEDIUM | `CreateBookingUseCase` | Preserve exact hardcoded value from legacy controller until production config is established |
+| Chat route on booking router | 🟡 MEDIUM | `GET /bookings/chats/:id` | Include `chatController.getChatHistory` in clean `bookingRoutes.js` |
+| `paymentController` booking status gate | 🟡 MEDIUM | `verifyPaymentSignature` | `paymentController` uses `models/Booking.js` → proxy automatically resolves; no changes needed |
+| Double Mongoose model registration | 🟢 LOW | `BookingSchema.js` | Idempotent guard eliminates risk |
+| Test suite import of `routes/booking.js` | 🟢 LOW | Both test files | Legacy routes never removed; tests unaffected |
+
+---
+
+## 6. Migration Strategy
+
+### Phase A — Build Clean Module (copy-first, no legacy changes)
+
+**Order:**
+
+1. `domain/entities/Booking.js` — pure entity, no Mongoose
+2. `application/ports/BookingRepositoryPort.js` — CRUD + populate interface
+3. `application/ports/NotificationPort.js` — socket + telegram interface
+4. `application/ports/TimerPort.js` — start/cancel timer interface
+5. `infrastructure/persistence/schemas/BookingSchema.js` — canonical schema, idempotent guard
+6. `infrastructure/repositories/MongoBookingRepository.js` — full implementation
+7. `infrastructure/adapters/SocketNotificationAdapter.js` — wraps `socketService.js`
+8. `infrastructure/adapters/TelegramNotificationAdapter.js` — wraps `telegramService.js`
+9. `infrastructure/adapters/InMemoryTimerAdapter.js` — own timer Map, same logic as `bookingController`
+10. Use cases (7): `CreateBooking`, `AcceptBooking`, `StartBooking`, `CompleteBooking`, `CancelBooking`, `GetBookingById`, `GetBookingHistory`
+11. `infrastructure/di/container.js` — full DI wiring
+12. `interfaces/http/controllers/BookingController.js` — clean HTTP controller
+13. `interfaces/http/routes/bookingRoutes.js` — mirrors legacy routes (validation + chat)
+
+**At no point in Phase A does anything touch existing files.**
+
+### Phase B — Verification (before proxy)
+
+1. Run all 23 existing tests → must pass
+2. Run `Booking.populate('workerId')` + `Booking.populate('customerId')` integration script
+3. Run geospatial smoke test to confirm Worker query still works
+4. Manually verify all 7 booking routes respond on the dev server
+
+### Phase C — Proxy Wrapper
+
+Modify only `src/models/Booking.js`:
+
+```js
+// Backward Compatibility Proxy Wrapper
+import Booking from '../modules/booking/infrastructure/persistence/schemas/BookingSchema.js';
+export default Booking;
+```
+
+Run all tests immediately after. Must still pass 23/23.
+
+### Phase D — Defer (post-approval of Phase 3.3)
+
+- Replace `src/index.js` booking route mount to use `modules/booking/interfaces/http/routes/bookingRoutes.js`
+- Deprecate `src/routes/booking.js` and `src/controllers/bookingController.js`
+- This is **NOT** part of Phase 3.3 implementation
+
+---
+
+## 7. Rollback Strategy
+
+| Step | Rollback Action |
+|---|---|
+| After Phase A (new files created) | Delete `src/modules/booking/` — zero legacy impact |
+| After Phase C (proxy deployed) | Restore original `src/models/Booking.js` from git (`git checkout -- src/models/Booking.js`) |
+| After any test failure | `git stash` — legacy routes remain active; no user-facing disruption |
+| Emergency | `git revert` Phase 3.3 commit — single atomic revert |
+
+---
+
+## 8. Verification Strategy
+
+### 8.1 Automated Tests
+```bash
+node --experimental-vm-modules node_modules/jest/bin/jest.js tests/ --runInBand --detectOpenHandles
+```
+Expected: **23 passed, 0 failed** — before proxy, after proxy, and after Phase D.
+
+### 8.2 Populate Verification (new script)
+- Create real Booking → populate `customerId` → assert `name` field present
+- Create real Booking → populate `workerId` → assert `name`, `mobile`, `serviceCategory` present
+- Confirm `mongoose.models.Booking` count === 1
+
+### 8.3 State Machine Smoke Tests (live dev server)
+All 7 endpoints verified with correct HTTP responses:
+
+| Endpoint | Token | Expected |
+|---|---|---|
+| `POST /api/v1/bookings` | customer | `201` |
+| `PUT /api/v1/bookings/:id/accept` | worker | `200` |
+| `PUT /api/v1/bookings/:id/start` | worker | `200` |
+| `PUT /api/v1/bookings/:id/complete` | worker | `200` |
+| `PUT /api/v1/bookings/:id/cancel` | customer | `200` |
+| `GET /api/v1/bookings/:id` | any | `200` |
+| `GET /api/v1/bookings/history` | any | `200` |
+| `GET /api/v1/bookings/chats/:id` | any | `200` |
+
+### 8.4 Cross-Module Regression Verification
+- `POST /api/v1/payments/create-order` — reads booking (proxy)
+- `POST /api/v1/payments/verify` — status gate + wallet settlement (proxy)
+- `POST /api/v1/reviews` — status gate check (proxy)
+
+### 8.5 No Mongoose Overwrite Warnings
+Confirm dev server logs contain zero `OverwriteModelError` or `Cannot overwrite` messages after proxy is applied.
+
+---
+
+## 9. Files Summary
+
+| File | Action | Risk |
+|---|---|---|
+| `src/modules/booking/domain/entities/Booking.js` | CREATE | None |
+| `src/modules/booking/application/ports/BookingRepositoryPort.js` | CREATE | None |
+| `src/modules/booking/application/ports/NotificationPort.js` | CREATE | None |
+| `src/modules/booking/application/ports/TimerPort.js` | CREATE | None |
+| `src/modules/booking/infrastructure/persistence/schemas/BookingSchema.js` | CREATE | Low |
+| `src/modules/booking/infrastructure/repositories/MongoBookingRepository.js` | CREATE | None |
+| `src/modules/booking/infrastructure/adapters/SocketNotificationAdapter.js` | CREATE | None |
+| `src/modules/booking/infrastructure/adapters/TelegramNotificationAdapter.js` | CREATE | None |
+| `src/modules/booking/infrastructure/adapters/InMemoryTimerAdapter.js` | CREATE | None |
+| `src/modules/booking/application/use-cases/*.js` (×7) | CREATE | Medium — state machine logic |
+| `src/modules/booking/infrastructure/di/container.js` | CREATE | None |
+| `src/modules/booking/interfaces/http/controllers/BookingController.js` | CREATE | None |
+| `src/modules/booking/interfaces/http/routes/bookingRoutes.js` | CREATE | None |
+| `src/models/Booking.js` | MODIFY (proxy only) | Low |
+| `src/controllers/bookingController.js` | **UNTOUCHED** | — |
+| `src/routes/booking.js` | **UNTOUCHED** | — |
+| `tests/bookingStateMachine.test.js` | **UNTOUCHED** | — |
+| `tests/paymentRedirect.test.js` | **UNTOUCHED** | — |

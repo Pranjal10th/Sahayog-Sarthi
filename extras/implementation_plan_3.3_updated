@@ -1,0 +1,364 @@
+# Phase 3.3: Booking Module Migration Plan (Revised)
+
+## Goal
+
+Migrate the Booking module to Clean Architecture using the proven copy-first strategy from Phase 3.2.  
+The booking state machine, payment cross-dependency, real-time socket events, Telegram alerts, and chat must remain **functionally identical** throughout and after migration.
+
+---
+
+## 1. Dependency Analysis
+
+### 1.1 Direct Importers of `models/Booking.js`
+
+| File | Role |
+|---|---|
+| `src/controllers/bookingController.js` | Core CRUD + state machine (7 actions) |
+| `src/controllers/paymentController.js` | Reads booking for order creation + verifies status before wallet settlement |
+| `src/controllers/review.js` | Reads booking to validate `status === 'completed'` before accepting a review |
+| `src/services/telegramService.js` | Reads booking to dispatch Telegram alert on new booking |
+| `src/services/reminderService.js` | Reads and writes booking during 60s auto-timeout |
+| `src/modules/worker/infrastructure/persistence/repositories/MongoBookingRepository.js` | Dashboard: active bookings for worker |
+| `src/modules/worker/infrastructure/persistence/repositories/MongoPaymentRepository.js` | Dashboard: payment lookup by booking IDs |
+| `tests/bookingStateMachine.test.js` | 14 state machine integration tests |
+| `tests/paymentRedirect.test.js` | Payment flow integration tests |
+
+### 1.2 Direct Importers of `routes/booking.js`
+
+| File | Role |
+|---|---|
+| `src/index.js` | Mounts at `/api/v1/bookings` |
+| `tests/bookingStateMachine.test.js` | Builds test Express app with legacy routes |
+| `tests/paymentRedirect.test.js` | Builds test Express app with legacy routes |
+
+### 1.3 Indirect Dependency Chain
+
+```
+bookingController.js
+├── models/Booking.js              ← state machine persisted here
+├── models/Worker.js               ← blocked worker guard in acceptBooking
+├── services/socketService.js      ← 5 distinct booking socket events
+├── services/telegramService.js    ← sendBookingAlertToWorker on create
+└── [in-memory] activeBookingTimers Map  ← 60s auto-cancel timer
+
+paymentController.js
+├── models/Booking.js              ← status gate: must be 'completed'
+├── models/Worker.js               ← wallet $inc on settlement
+└── models/Payment.js
+
+review.js
+├── models/Booking.js              ← status gate: must be 'completed'
+├── models/Worker.js               ← aggregates rating post-review
+└── models/Review.js
+
+reminderService.js
+├── models/Booking.js              ← auto-cancels if pending at T+60s
+└── services/socketService.js      ← broadcasts timeout event
+```
+
+---
+
+## 2. State Machine Map
+
+```
+pending ──(accept)──► accepted ──(start)──► in_progress ──(complete)──► completed ──(payment)──► paid
+   │                     │
+   └──(cancel)──► cancelled ◄──(cancel)──┘
+   │
+   └──(auto-timeout at T+60s)──► cancelled
+```
+
+### Transition Guards (must be preserved exactly)
+
+| Transition | From | To | Guard |
+|---|---|---|---|
+| accept | `pending` | `accepted` | Worker must not be blocked (`isBlocked === false`) |
+| start | `accepted` | `in_progress` | None |
+| complete | `in_progress` | `completed` | None |
+| cancel (no fee) | `pending` | `cancelled` | Clears active timer |
+| cancel (with fee) | `accepted` | `cancelled` | Records `metadata.cancellationFee = { amount: 50, currency: 'INR' }` |
+| auto-timeout | `pending` | `cancelled` | Triggered by 60s in-memory timer |
+| payment verify | `completed` | `paid` + `paymentStatus: 'paid'` | `status === 'completed'` strict check |
+
+### Side Effects Per Transition (must be preserved exactly)
+
+| Transition | Socket Event | Telegram | Timer |
+|---|---|---|---|
+| create | `booking:new` → worker socket | `sendBookingAlertToWorker` | Start 60s countdown |
+| accept | `booking:accepted` → customer socket | — | Cancel countdown |
+| start | `booking:started` → `booking_{id}` room | — | — |
+| complete | `booking:completed` → `booking_{id}` room | — | — |
+| cancel | `booking:cancelled` → `booking_{id}` room | — | Cancel countdown if pending |
+| auto-timeout | `booking:timeout` → `booking_{id}` room | — | Self-clears |
+
+---
+
+## 3. [NEW] State Machine Compatibility Verification
+
+After deploying the proxy wrapper (`models/Booking.js` → `BookingSchema.js`), all state machine transitions must be verified against the **legacy routes** (which remain active throughout Phase 3.3).
+
+### 3.1 Valid Transitions (must all return `200` or `201`)
+
+| # | From | Endpoint | To | Expected |
+|---|---|---|---|---|
+| 1 | — | `POST /api/v1/bookings` | `pending` | `201` |
+| 2 | `pending` | `PUT /:id/accept` | `accepted` | `200` + `booking.status === 'accepted'` |
+| 3 | `accepted` | `PUT /:id/start` | `in_progress` | `200` + `booking.status === 'in_progress'` |
+| 4 | `in_progress` | `PUT /:id/complete` | `completed` | `200` + `booking.status === 'completed'` |
+| 5 | `completed` | `POST /payments/verify` (mock) | `paid` | `200` + `booking.status === 'paid'` + `paymentStatus === 'paid'` |
+| 6 | `pending` | `PUT /:id/cancel` | `cancelled` | `200` + no `metadata.cancellationFee` |
+| 7 | `accepted` | `PUT /:id/cancel` | `cancelled` | `200` + `metadata.cancellationFee.amount === 50` |
+
+### 3.2 Invalid Transitions (must all return `400`)
+
+| # | From | Endpoint | Attempted To | Expected |
+|---|---|---|---|---|
+| 8 | `pending` | `PUT /:id/start` | `in_progress` | `400` — cannot skip accepted |
+| 9 | `accepted` | `PUT /:id/complete` | `completed` | `400` — must be in_progress first |
+| 10 | `in_progress` | `POST /payments/verify` | `paid` | `400` — must be completed |
+| 11 | `completed` | `PUT /:id/cancel` | `cancelled` | `400` — completed cannot be cancelled |
+
+### 3.3 Blocked Worker Guard (must return `403`)
+
+| # | Precondition | Endpoint | Expected |
+|---|---|---|---|
+| 12 | Worker `isBlocked: true` | `PUT /:id/accept` | `403` with `'blocked'` in error message |
+| 13 | Worker `isBlocked: true` | `PUT /:id` (profile) `{ isAvailable: true }` | `403` with `'Blocked workers'` in error message |
+
+**Coverage:** All 13 scenarios above are already covered by `tests/bookingStateMachine.test.js`. Verification = running that test suite. Zero new test code is required.
+
+---
+
+## 4. [NEW] Payment Settlement Verification
+
+`paymentController.js` reads `models/Booking.js` in two places:
+1. `createPaymentOrder` — `Booking.findById(bookingId)` to read `amount`
+2. `verifyPaymentSignature` — `Booking.findById(bookingId)` then strict `status === 'completed'` gate, then `Booking.findByIdAndUpdate(..., { paymentStatus: 'paid', status: 'paid' })`
+
+The proxy wrapper (`models/Booking.js → BookingSchema.js`) covers both calls transparently. No changes to `paymentController.js` are required.
+
+### What the verification script will confirm:
+
+| Check | Method |
+|---|---|
+| `createPaymentOrder` reads booking amount correctly | `Booking.findById` via proxy |
+| `verifyPaymentSignature` status gate blocks non-completed bookings | `booking.status !== 'completed'` guard |
+| Booking status updates to `paid` + `paymentStatus: paid` | `Booking.findByIdAndUpdate` via proxy |
+| Payment record `status` updates to `paid` | `Payment.findOneAndUpdate` |
+| Worker `walletBalance` increments by `amount * (1 - commissionRate)` | `Worker.findByIdAndUpdate({ $inc: { walletBalance: netEarnings } })` |
+
+**Coverage:** Fully covered by `tests/paymentRedirect.test.js` (which includes `POST /payments/create-order` + `POST /payments/verify` integration flow). No new test code required — the proxy is transparent to the test.
+
+---
+
+## 5. [NEW] Timer Architecture Clarification
+
+### Current State (3 timer implementations exist today)
+
+| Map | Location | Owner |
+|---|---|---|
+| `activeBookingTimers` | `src/controllers/bookingController.js` | Internal to the controller — starts on create, clears on accept/cancel |
+| `activeBookingTimers` | `src/services/reminderService.js` | External service — same logic, appears to be an architectural backup |
+
+> [!IMPORTANT]
+> **The original plan proposed a third `InMemoryTimerAdapter.js` in the clean module. This is removed.**
+
+### Decision: Defer Timer Abstraction
+
+A third timer map would create three independent in-memory registries tracking the same booking IDs. This introduces risk of:
+- Stale timer references if the wrong map is cleared on accept/cancel
+- Difficult to debug state divergence
+- No user-facing benefit during Phase 3.3 copy-first migration
+
+**Resolution:**
+
+The `CreateBookingUseCase` and `CancelBookingUseCase` in the clean module will call `reminderService.js` functions **directly** (not wrapped in a port), treating it as a shared infrastructure service:
+
+```js
+// Inside CreateBookingUseCase.execute()
+import { startBookingTimeoutCountdown } from '../../../../services/reminderService.js';
+startBookingTimeoutCountdown(booking._id, workerTelegramChatId);
+
+// Inside CancelBookingUseCase.execute()
+import { clearBookingTimeoutTimer } from '../../../../services/reminderService.js';
+clearBookingTimeoutTimer(bookingId);
+```
+
+> [!NOTE]
+> **Timer consolidation** (merging the two existing Maps into one canonical service) is deferred to a **Phase 3.5 Consolidation** pass, after all modules are migrated and before Phase D (index.js route swap).
+
+### Impact on File Count
+
+`InMemoryTimerAdapter.js` is **removed from the plan**. Files to create: **13** (was 14).
+
+---
+
+## 6. [NEW] Extended Populate Verification
+
+Three populate chains cross module boundaries after Booking.js becomes a proxy. All three must be verified.
+
+### 6.1 `Booking.populate('customerId')` + `Booking.populate('workerId')`
+
+Already covers the existing use case in `getBookingById` and `getBookingHistory`.
+
+```js
+Booking.findById(id)
+  .populate('customerId', 'name mobile profileImage')
+  .populate('workerId', 'name mobile serviceCategory rating location')
+```
+
+**Assert:** `customerId.name` and `workerId.name` are strings (not ObjectIds).
+
+### 6.2 `Payment.populate('bookingId')`
+
+`Payment.js` schema has `bookingId: { ref: 'Booking' }`. After the proxy is applied, Mongoose must resolve `'Booking'` to the correct model.
+
+```js
+Payment.findOne({ bookingId: testBookingId }).populate('bookingId')
+// Assert: populated.bookingId.serviceType === 'Electrician'
+// Assert: populated.bookingId.constructor.modelName === 'Booking'
+```
+
+### 6.3 `Review.populate('bookingId')`
+
+`Review.js` schema has `bookingId: { ref: 'Booking' }`. Same cross-model reference check.
+
+```js
+Review.findOne({ bookingId: testBookingId }).populate('bookingId')
+// Assert: populated.bookingId.status === 'completed'
+// Assert: populated.bookingId.constructor.modelName === 'Booking'
+```
+
+### 6.4 `Chat.populate('bookingId')`
+
+`Chat.js` schema has `bookingId: { ref: 'Booking' }`. Confirm chat history retrieval.
+
+```js
+Chat.findOne({ bookingId: testBookingId }).populate('bookingId')
+// Assert: populated.bookingId.serviceType is populated
+```
+
+All 4 populate checks will be combined into a single `scratch/populateVerifyBooking.js` script that creates test data, asserts, and cleans up — identical to the Worker populate verification approach.
+
+---
+
+## 7. Files to Create
+
+### Phase A — New Clean Module
+
+```
+src/modules/booking/
+├── domain/entities/Booking.js                              [NEW]
+├── application/ports/BookingRepositoryPort.js              [NEW]
+├── application/ports/NotificationPort.js                   [NEW]
+├── application/use-cases/CreateBookingUseCase.js           [NEW]
+├── application/use-cases/AcceptBookingUseCase.js           [NEW]
+├── application/use-cases/StartBookingUseCase.js            [NEW]
+├── application/use-cases/CompleteBookingUseCase.js         [NEW]
+├── application/use-cases/CancelBookingUseCase.js           [NEW]
+├── application/use-cases/GetBookingByIdUseCase.js          [NEW]
+├── application/use-cases/GetBookingHistoryUseCase.js       [NEW]
+├── infrastructure/persistence/schemas/BookingSchema.js     [NEW]
+├── infrastructure/repositories/MongoBookingRepository.js   [NEW]
+├── infrastructure/adapters/SocketNotificationAdapter.js    [NEW]
+├── infrastructure/adapters/TelegramNotificationAdapter.js  [NEW]
+├── infrastructure/di/container.js                         [NEW]
+└── interfaces/http/
+    ├── controllers/BookingController.js                    [NEW]
+    └── routes/bookingRoutes.js                             [NEW]
+```
+
+**Total new files: 17**  
+*(No `InMemoryTimerAdapter.js` — timer deferred to Phase 3.5)*
+
+### Phase B — Verification Scripts
+
+```
+scratch/populateVerifyBooking.js    [NEW]
+```
+
+### Phase C — Proxy Wrapper
+
+```
+src/models/Booking.js              [MODIFY — 6-line proxy re-export only]
+```
+
+### Preserved Without Modification
+
+```
+src/controllers/bookingController.js    [UNTOUCHED throughout Phase 3.3]
+src/routes/booking.js                   [UNTOUCHED throughout Phase 3.3]
+src/services/reminderService.js         [UNTOUCHED — referenced directly by use cases]
+src/services/socketService.js           [UNTOUCHED — wrapped by adapter]
+src/services/telegramService.js         [UNTOUCHED — wrapped by adapter]
+src/controllers/chatController.js       [UNTOUCHED]
+src/middlewares/validationMiddleware.js [UNTOUCHED]
+tests/bookingStateMachine.test.js       [UNTOUCHED]
+tests/paymentRedirect.test.js           [UNTOUCHED]
+```
+
+---
+
+## 8. Risk Assessment
+
+| Risk | Severity | Affected Component | Mitigation |
+|---|---|---|---|
+| State machine transition logic divergence | 🔴 CRITICAL | All 7 use cases | Port guards verbatim; 14 existing tests remain green throughout |
+| Timer state divergence (2 maps today) | 🟡 MEDIUM | `reminderService.js` | Deferred to Phase 3.5 — clean module calls `reminderService` directly |
+| `Booking` model name resolution via proxy | 🟡 MEDIUM | 4 populate chains | Idempotent guard + explicit populate verification script |
+| Payment status gate breaking | 🟡 MEDIUM | `paymentController.verifyPaymentSignature` | Proxy covers transparently; `paymentRedirect.test.js` confirms |
+| Telegram hardcoded chat ID | 🟢 LOW | `CreateBookingUseCase` | Copied as-is — existing tech debt, not introduced here |
+| Double Mongoose model registration | 🟢 LOW | `BookingSchema.js` | `mongoose.models.Booking \|\| mongoose.model(...)` guard |
+| Chat route on booking router | 🟢 LOW | `GET /bookings/chats/:id` | Included in clean `bookingRoutes.js` |
+
+---
+
+## 9. Migration Order (Phase A Build Sequence)
+
+1. `domain/entities/Booking.js`
+2. `application/ports/BookingRepositoryPort.js`
+3. `application/ports/NotificationPort.js`
+4. `infrastructure/persistence/schemas/BookingSchema.js`
+5. `infrastructure/repositories/MongoBookingRepository.js`
+6. `infrastructure/adapters/SocketNotificationAdapter.js`
+7. `infrastructure/adapters/TelegramNotificationAdapter.js`
+8. Use Cases: `CreateBooking` → `AcceptBooking` → `StartBooking` → `CompleteBooking` → `CancelBooking` → `GetBookingById` → `GetBookingHistory`
+9. `infrastructure/di/container.js`
+10. `interfaces/http/controllers/BookingController.js`
+11. `interfaces/http/routes/bookingRoutes.js`
+
+---
+
+## 10. Rollback Strategy
+
+| Step | Rollback Action |
+|---|---|
+| After Phase A (new files only) | Delete `src/modules/booking/` — zero legacy impact |
+| After Phase C (proxy deployed) | `git checkout -- src/models/Booking.js` — legacy schema restored instantly |
+| After any test failure | `git stash` — legacy routes remain active, no user disruption |
+| Emergency | `git revert <Phase3.3 commit>` — single atomic revert |
+
+---
+
+## 11. Verification Sequence
+
+```
+1. Run all 23 tests (pre-proxy)                   → must pass
+2. Apply proxy: models/Booking.js
+3. Run all 23 tests (post-proxy)                  → must pass
+4. Run scratch/populateVerifyBooking.js             → 4 populate chains pass
+5. Run state machine smoke tests (live server)     → 13 scenarios pass
+6. Run payment settlement smoke tests              → booking.status = 'paid', wallet credited
+7. Confirm zero OverwriteModelError in dev logs
+```
+
+---
+
+## 12. What is Deferred (Not in Phase 3.3)
+
+| Item | Deferred To |
+|---|---|
+| Replace `src/index.js` booking route mount | Phase D (post-3.3 approval) |
+| Deprecate `src/controllers/bookingController.js` | Phase D |
+| Merge 2 timer Maps into 1 canonical `reminderService` | Phase 3.5 Consolidation |
+| Add `TimerPort` abstraction | Phase 3.5 Consolidation |

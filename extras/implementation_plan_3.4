@@ -1,0 +1,373 @@
+# Phase 3.4: Payment, Review, and Chat Module Migration Plan
+
+## Goal
+
+Perform dependency analysis and define the migration strategy for the three remaining supporting modules:  
+**Payment**, **Review**, and **Chat** — using the same copy-first, proxy-wrapper approach validated in Phases 3.2 and 3.3.
+
+---
+
+## 1. Direct Import Counts
+
+### Payment (`src/models/Payment.js`)
+
+| # | Importer | Purpose |
+|---|---|---|
+| 1 | `src/controllers/paymentController.js` | Creates, updates, reads Payment documents (order creation, verify, withdrawal) |
+| 2 | `src/controllers/workerController.js` | Reads payment records for worker dashboard |
+| 3 | `src/modules/worker/infrastructure/persistence/repositories/MongoPaymentRepository.js` | Worker dashboard: recent payments for a worker |
+| 4 | `tests/bookingStateMachine.test.js` | `deleteMany` cleanup in beforeAll/afterAll |
+| 5 | `tests/paymentRedirect.test.js` | Full payment flow integration tests |
+| 6 | `scratch/phase33RealVerification.js` | Verification script (non-production) |
+
+**Total direct importers: 6**  
+**Production importers: 3**  
+**Test importers: 2**
+
+---
+
+### Review (`src/models/Review.js`)
+
+| # | Importer | Purpose |
+|---|---|---|
+| 1 | `src/controllers/review.js` | Creates review, runs rating aggregation pipeline |
+| 2 | `src/modules/booking/...` *(none — Review not imported by clean booking module)* | — |
+| 3 | `scratch/populateVerifyBooking.js` | Populate verification (non-production) |
+
+**Total direct importers: 1 production, 1 scratch**
+
+> [!NOTE]
+> Review is the most isolated model in the entire codebase. Only one production controller imports it.
+
+---
+
+### Chat (`src/models/Chat.js`)
+
+| # | Importer | Purpose |
+|---|---|---|
+| 1 | `src/controllers/chatController.js` | `getChatHistory` — reads Chat sorted by timestamp |
+| 2 | `src/services/socketService.js` | `Chat.create()` — persists incoming `chat:message` socket events to MongoDB |
+| 3 | `src/modules/booking/interfaces/http/routes/bookingRoutes.js` | Imports `chatController` (indirect Chat dependency) |
+
+**Total direct importers: 2 production, 1 indirect via controller**
+
+> [!WARNING]
+> `socketService.js` imports `Chat` at the **module initialization level** (line 3), not inside an async handler. This means Chat's Mongoose model must be registered at app startup — the proxy must resolve before socket events can persist messages.
+
+---
+
+## 2. All `populate()` Dependencies
+
+### Across the entire `src/` directory (exhaustive)
+
+| Call Site | Model Field Populated | Ref Target |
+|---|---|---|
+| `bookingController.js:166-167` | `customerId`, `workerId` | `User`, `Worker` |
+| `bookingController.js:188-189` | `customerId`, `workerId` | `User`, `Worker` |
+| `modules/worker/.../MongoBookingRepository.js:12` | `customerId` | `User` |
+| `modules/booking/.../MongoBookingRepository.js:18-19` | `customerId`, `workerId` | `User`, `Worker` |
+| `modules/booking/.../MongoBookingRepository.js:34-35` | `customerId`, `workerId` | `User`, `Worker` |
+| `workerController.js:83` | `customerId` | `User` |
+
+### Payment model populate chains
+
+`Payment.js` schema defines:
+```
+bookingId → ref: 'Booking'
+customerId → ref: 'User'
+workerId   → ref: 'Worker'
+```
+**No existing production code calls `Payment.populate()` currently.**  
+The `MongoPaymentRepository.findRecentForWorker()` returns raw Payment documents (no populate). The clean Payment module will add `populate('bookingId')` support, verified in Phase 3.3's populate script.
+
+### Review model populate chains
+
+`Review.js` schema defines:
+```
+bookingId  → ref: 'Booking'
+customerId → ref: 'User'
+workerId   → ref: 'Worker'
+```
+**No existing production code calls `Review.populate()` currently.**  
+The aggregation pipeline in `review.js` uses `Review.aggregate()` (no populate). The clean module will add populate support.
+
+### Chat model populate chains
+
+`Chat.js` schema defines:
+```
+bookingId → ref: 'Booking'
+senderId  → raw ObjectId (no ref — polymorphic User/Worker)
+```
+**No existing production code calls `Chat.populate()` currently.**  
+`chatController.getChatHistory` does `Chat.find().sort()` only. The clean module will maintain this behaviour exactly.
+
+---
+
+## 3. Cross-Module Dependencies — Risk Inventory
+
+### 3.1 Wallet Settlement (🔴 CRITICAL)
+
+**Chain:**  
+`verifyPaymentSignature()` in `paymentController.js`  
+→ `Worker.findByIdAndUpdate(workerId, { $inc: { walletBalance: netEarnings } })`  
+→ `Payment.findOneAndUpdate(...)` → `status: 'paid'`
+
+**Risk:** `Worker` and `Booking` are now proxies. `Payment.js` still reads the original schema. After Phase 3.4 applies the Payment proxy, the wallet `$inc` must still execute on the same `workers` collection.
+
+**Mitigation:** Payment proxy simply re-exports from `PaymentSchema.js` (identical collection name `payments`). No collection rename occurs. `Worker.findByIdAndUpdate` already goes through the Worker proxy (Phase 3.2) which points to `WorkerSchema.js` — no breakage.
+
+---
+
+### 3.2 Rating Aggregation (🟡 MEDIUM)
+
+**Chain:**  
+`review.js:createReview()`  
+→ `Review.aggregate([{ $match: { workerId } }, { $group: { avgRating } }])`  
+→ `Worker.findByIdAndUpdate(workerId, { rating, totalRatings })`
+
+**Risk:** `Review.aggregate()` is a raw MongoDB pipeline — it does not go through Mongoose model resolution during execution. The proxy wrapper is safe here because the collection name (`reviews`) does not change.
+
+**Mitigation:** Proxy wrapper preserves collection name. Aggregation pipeline is not affected.
+
+---
+
+### 3.3 Chat Persistence via Socket (🟡 MEDIUM)
+
+**Chain:**  
+`socketService.js` → `Chat.create({ bookingId, senderId, senderModel, message })`  
+This happens inside the `chat:message` socket event handler at runtime.
+
+**Risk:** `Chat` is imported at module initialization time (top-level import on line 3 of `socketService.js`). If the proxy resolution fails at startup, the socket server would crash on first `chat:message` event — **not at import time**, making the failure silent until a user sends a chat message.
+
+**Mitigation:** Chat proxy must be verified with an actual `Chat.create()` call (not just `find()`) before Phase 3.4 is approved.
+
+---
+
+### 3.4 Worker Dashboard Payment Reads (🟢 LOW)
+
+**Chain:**  
+`MongoPaymentRepository.findRecentForWorker(workerId)`  
+→ `Booking.find({ workerId }).distinct('_id')` (Booking proxy ✅ already resolved)  
+→ `Payment.find({ bookingId: { $in: bookingIds } })`
+
+**Risk:** After Payment proxy is applied, this query continues to read from the same `payments` collection. No logical change.
+
+**Mitigation:** Worker dashboard smoke test already verifies `GET /workers/:id/dashboard` (Phase 3.2). Will be re-run after Payment proxy.
+
+---
+
+### 3.5 Payment Status Gate on Booking (🟢 LOW)
+
+**Chain:**  
+`verifyPaymentSignature()` checks `booking.status !== 'completed'`  
+→ Booking is already a proxy (Phase 3.3) ✅
+
+This risk was already resolved. No action needed.
+
+---
+
+### 3.6 `returnDocument` vs `new` in `Worker.findByIdAndUpdate` (🟢 LOW)
+
+`paymentController.js` line 115 uses `{ returnDocument: 'after' }` which is a **MongoDB driver** option, not a Mongoose option. Mongoose uses `{ new: true }`. The existing code works because the raw Razorpay mock path uses it — this is pre-existing tech debt. Not introduced by migration.
+
+---
+
+## 4. Dependency Graph
+
+```
+index.js
+├── routes/payment.js
+│   └── paymentController.js
+│       ├── models/Payment.js     ←── [PROXY in Phase 3.4]
+│       ├── models/Booking.js     ←── already proxied ✅
+│       └── models/Worker.js      ←── already proxied ✅
+│
+├── routes/review.js
+│   └── review.js (controller)
+│       ├── models/Review.js      ←── [PROXY in Phase 3.4]
+│       ├── models/Booking.js     ←── already proxied ✅
+│       └── models/Worker.js      ←── already proxied ✅
+│
+└── routes/booking.js
+    └── chatController.js
+        └── models/Chat.js        ←── [PROXY in Phase 3.4]
+
+services/socketService.js
+    └── models/Chat.js            ←── [PROXY in Phase 3.4] — initialized at startup
+
+modules/worker/
+    └── MongoPaymentRepository.js
+        └── models/Payment.js     ←── [PROXY in Phase 3.4]
+        └── models/Booking.js     ←── already proxied ✅
+
+tests/bookingStateMachine.test.js
+    └── models/Payment.js         ←── [PROXY in Phase 3.4]
+
+tests/paymentRedirect.test.js
+    └── models/Payment.js         ←── [PROXY in Phase 3.4]
+```
+
+---
+
+## 5. Proposed Migration Order
+
+### Rationale for Ordering
+
+| Module | Complexity | Cross-Dependencies | Order |
+|---|---|---|---|
+| Chat | Lowest | 1 production importer. `socketService.js` startup risk. No populate. | **1st** |
+| Review | Low | 1 production importer. No populate in production. Aggregation pipeline safe. | **2nd** |
+| Payment | Highest | 3 production importers. Wallet $inc chain. Razorpay integration. 2 test files. | **3rd** |
+
+---
+
+### Phase A — Chat Module (migrate first)
+
+**New files to create:**
+
+```
+src/modules/chat/
+├── domain/entities/ChatMessage.js
+├── application/ports/ChatRepositoryPort.js
+├── application/use-cases/GetChatHistoryUseCase.js
+├── application/use-cases/PersistChatMessageUseCase.js
+├── infrastructure/persistence/schemas/ChatSchema.js       ← idempotent guard
+├── infrastructure/repositories/MongoChatRepository.js
+├── infrastructure/di/container.js
+└── interfaces/http/controllers/ChatController.js
+```
+
+**Proxy:**
+
+```
+src/models/Chat.js  →  src/modules/chat/infrastructure/persistence/schemas/ChatSchema.js
+```
+
+**Critical verification after Chat proxy:**
+- `Chat.create()` via socket event (must not silently fail)
+- `Chat.find().sort()` via `getChatHistory` route
+- `Chat.populate('bookingId')` — verifies Booking ref still resolves
+
+---
+
+### Phase B — Review Module (migrate second)
+
+**New files to create:**
+
+```
+src/modules/review/
+├── domain/entities/Review.js
+├── application/ports/ReviewRepositoryPort.js
+├── application/use-cases/CreateReviewUseCase.js
+├── infrastructure/persistence/schemas/ReviewSchema.js     ← idempotent guard
+├── infrastructure/repositories/MongoReviewRepository.js
+├── infrastructure/di/container.js
+└── interfaces/http/controllers/ReviewController.js
+```
+
+**Proxy:**
+
+```
+src/models/Review.js  →  src/modules/review/infrastructure/persistence/schemas/ReviewSchema.js
+```
+
+**Critical verification after Review proxy:**
+- `Review.aggregate()` rating pipeline still executes and updates Worker.rating
+- `Review.populate('bookingId')` still resolves
+- Worker rating field updates correctly after review creation
+
+---
+
+### Phase C — Payment Module (migrate last)
+
+**New files to create:**
+
+```
+src/modules/payment/
+├── domain/entities/Payment.js
+├── application/ports/PaymentRepositoryPort.js
+├── application/ports/PaymentGatewayPort.js               ← Razorpay abstraction
+├── application/use-cases/CreatePaymentOrderUseCase.js
+├── application/use-cases/VerifyPaymentUseCase.js
+├── application/use-cases/RequestWithdrawalUseCase.js
+├── infrastructure/persistence/schemas/PaymentSchema.js    ← idempotent guard
+├── infrastructure/repositories/MongoPaymentRepository.js
+├── infrastructure/adapters/RazorpayAdapter.js             ← wraps Razorpay SDK
+├── infrastructure/adapters/MockPaymentAdapter.js          ← sandbox path
+├── infrastructure/di/container.js
+└── interfaces/http/controllers/PaymentController.js
+```
+
+**Proxy:**
+
+```
+src/models/Payment.js  →  src/modules/payment/infrastructure/persistence/schemas/PaymentSchema.js
+```
+
+**Critical verification after Payment proxy:**
+- Full `pending → accepted → in_progress → completed → paid` lifecycle test
+- Wallet settlement: `Worker.walletBalance` increases by `amount * (1 - commissionRate)`
+- Payment record status transitions: `created → paid`
+- Withdrawal deducts from `walletBalance` and creates `transactionType: 'withdrawal'` record
+- `tests/paymentRedirect.test.js` — all 4 tests pass (23/23 total)
+
+---
+
+## 6. Files to Modify (Proxy Only)
+
+| File | Modification | Risk |
+|---|---|---|
+| `src/models/Chat.js` | 6-line proxy → `ChatSchema.js` | Low |
+| `src/models/Review.js` | 6-line proxy → `ReviewSchema.js` | Low |
+| `src/models/Payment.js` | 6-line proxy → `PaymentSchema.js` | Medium — wallet chain |
+
+**All other files remain untouched throughout Phase 3.4.**  
+`src/index.js`, all route files, all controllers, all test files — **zero changes**.
+
+---
+
+## 7. Rollback Strategy
+
+| Scenario | Rollback Action |
+|---|---|
+| Clean module files only created (Phase A/B/C) | Delete module folder — zero legacy impact |
+| After Chat proxy applied | `git checkout -- src/models/Chat.js` |
+| After Review proxy applied | `git checkout -- src/models/Review.js` |
+| After Payment proxy applied | `git checkout -- src/models/Payment.js` |
+| Full Phase 3.4 rollback | `git revert <Phase3.4 commit>` — single atomic revert restores all 3 models |
+| Emergency production rollback | Replace proxy with original schema inline — 3 files, ~10 lines each |
+
+> [!CAUTION]
+> Payment rollback requires immediate re-run of `tests/paymentRedirect.test.js` to verify wallet settlement integrity is preserved post-revert.
+
+---
+
+## 8. Verification Sequence Per Module
+
+```
+For each module (Chat → Review → Payment):
+
+  Step 1: Run full test suite (pre-proxy baseline)    → must be 23 passed
+  Step 2: Build clean module (copy-first)
+  Step 3: Run populate verification script
+  Step 4: Apply proxy wrapper to models/[X].js
+  Step 5: Run full test suite (post-proxy)            → must be 23 passed
+  Step 6: Run populate verification script again
+  Step 7: Run live API smoke tests
+```
+
+**Additionally for Payment only:**
+- Real wallet settlement verification (before/after wallet balance)
+- Withdrawal transaction creation check
+
+---
+
+## 9. What is NOT in Phase 3.4
+
+| Item | Deferred To |
+|---|---|
+| Replace `src/index.js` route mounts | Phase D |
+| Deprecate legacy controllers (payment, review, chat) | Phase D |
+| `Razorpay` production key integration | External dependency — not a migration concern |
+| Timer consolidation (two `activeBookingTimers` Maps) | Phase 3.5 Consolidation |
+| Remove scratch/verification scripts | Final cleanup phase |

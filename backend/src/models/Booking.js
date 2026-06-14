@@ -1,28 +1,6 @@
-import mongoose from 'mongoose';
-
-const bookingSchema = new mongoose.Schema({
-  customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  workerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Worker', required: true },
-  serviceType: { type: String, required: true },
-  status: { 
-    type: String, 
-    enum: ['pending', 'accepted', 'in_progress', 'completed', 'paid', 'cancelled'],
-    default: 'pending' 
-  },
-  scheduledAt: { type: Date, default: Date.now },
-  completedAt: { type: Date },
-  amount: { type: Number, required: true },
-  paymentStatus: { type: String, enum: ['pending', 'paid', 'refunded'], default: 'pending' },
-  customerAddress: { type: String, required: true },
-  notes: { type: String },
-  metadata: { type: mongoose.Schema.Types.Mixed, default: {} }
-}, { timestamps: true });
-
-// Performance Query Compound Indexes
-bookingSchema.index({ customerId: 1, createdAt: -1 });
-bookingSchema.index({ workerId: 1, createdAt: -1 });
-bookingSchema.index({ workerId: 1, status: 1 });
-bookingSchema.index({ status: 1, createdAt: -1 });
-
-const Booking = mongoose.model('Booking', bookingSchema);
-export default Booking;
+// backend/src/models/Booking.js (Backward Compatibility Proxy Wrapper)
+// All imports of `../models/Booking.js` now resolve to the canonical schema
+// defined in the clean Booking module. This eliminates duplicate schema
+// definitions and ensures a single source of truth for the Booking collection.
+import Booking from '../modules/booking/infrastructure/persistence/schemas/BookingSchema.js';
+export default Booking;
