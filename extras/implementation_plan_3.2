@@ -1,0 +1,177 @@
+# Phase 3.2 Worker Module Migration Plan
+
+This plan details the implementation strategy to migrate the Worker module to a Hexagonal / Clean Architecture design pattern, while maintaining strict backward compatibility for all dependent modules (Booking, Payment, Review, Chat) and test suites.
+
+---
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Geospatial & populate queries compatibility:**
+> Dependent collections (such as `Booking`) populate the `workerId` reference. To ensure no breaking changes in Mongoose populations and aggregate lookups, the new Mongoose schema will compile to the model name `'Worker'` and will be exposed through a proxy wrapper in [models/Worker.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/Worker.js).
+
+---
+
+## Open Questions
+
+*No open questions are active.*
+
+---
+
+## Dependency Analysis & Graph
+
+### Files Importing Worker Module Components
+
+#### Direct Imports of `Worker.js` (Mongoose Model)
+*   **Controllers:**
+    *   [bookingController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/bookingController.js) (Populates Sarthi details, checks blocked status)
+    *   [paymentController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/paymentController.js) (Adjusts Sarthi wallet balances)
+    *   [review.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/review.js) (Saves review ratings to Sarthi logs)
+    *   [authController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/authController.js) (Legacy auth routes reference)
+    *   [AuthController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/interfaces/http/controllers/AuthController.js) (Clean Auth controller checks)
+*   **Infrastructure / Repositories:**
+    *   [MongoWorkerRepository.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/infrastructure/persistence/repositories/MongoWorkerRepository.js) (Clean Auth persistence mapper)
+    *   [container.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/modules/auth/infrastructure/di/container.js) (DI wires repository dependencies)
+*   **Services:**
+    *   [telegramService.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/services/telegramService.js) (Checks Sarthi telegram profile mapping)
+    *   [socketService.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/services/socketService.js) (Tracks live geolocation coordinates mapping)
+    *   [locationService.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/services/locationService.js) (Performs 2dsphere proximity search aggregates)
+*   **Root Startup & Integration:**
+    *   [index.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/index.js) (Legacy setup scripts)
+*   **Test Suites:**
+    *   [bookingStateMachine.test.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/tests/bookingStateMachine.test.js)
+    *   [paymentRedirect.test.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/tests/paymentRedirect.test.js)
+    *   [cleanAuth.test.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/tests/cleanAuth.test.js)
+
+#### Direct Imports of `workerController.js`
+*   [routes/worker.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/routes/worker.js) (Exposes Sarthi dashboard, profiles, and admin actions)
+
+#### Direct Imports of Worker Routes (`src/routes/worker.js`)
+*   [src/index.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/index.js) (Mounts routes under `/api/v1/workers`)
+*   [tests/bookingStateMachine.test.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/tests/bookingStateMachine.test.js) (Fires request payloads)
+*   [tests/paymentRedirect.test.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/tests/paymentRedirect.test.js) (Validates approval states)
+
+---
+
+### Dependency Graph
+
+```mermaid
+graph TD
+  %% Controllers & Routes
+  index[index.js] -->|mounts| workerRoutes[routes/worker.js]
+  workerRoutes -->|imports| workerController[controllers/workerController.js]
+  
+  %% Core Business Logic Lookups
+  workerController -->|uses| locationService[services/locationService.js]
+  locationService -->|queries| WorkerModel[models/Worker.js]
+  workerController -->|queries| WorkerModel
+  
+  %% Other Systems depending on Worker Model
+  bookingController[controllers/bookingController.js] -->|populates/checks| WorkerModel
+  paymentController[controllers/paymentController.js] -->|updates wallet| WorkerModel
+  reviewController[controllers/review.js] -->|updates rating| WorkerModel
+  telegramService[services/telegramService.js] -->|queries profile| WorkerModel
+  socketService[services/socketService.js] -->|emits location| WorkerModel
+  
+  %% Clean Auth references
+  authController[modules/auth AuthController] -->|queries| WorkerModel
+  
+  %% Test dependencies
+  cleanAuthTest[cleanAuth.test.js] --> WorkerModel
+  bookingTest[bookingStateMachine.test.js] --> WorkerModel
+  paymentTest[paymentRedirect.test.js] --> WorkerModel
+```
+
+---
+
+## Risk Assessment & Mitigation
+
+### 1. Proximity Geospatial Indexes (2dsphere)
+*   **Risk:** `locationService.js` relies on a `$geoNear` aggregation matching queries to the `Worker` collection. If the Mongoose database index is not built correctly, search calls fail.
+*   **Mitigation:** Define `workerSchema.index({ location: '2dsphere' })` explicitly inside `WorkerSchema.js` so Mongoose sets up the index at connection time.
+
+### 2. Mongoose Populate Queries
+*   **Risk:** Booking populations (`.populate('workerId')`) search model collections using registry names. Any mismatch in compilation breaks the population result.
+*   **Mitigation:** Compile the clean architecture persistence schema using:
+    ```javascript
+    mongoose.models.Worker || mongoose.model('Worker', workerSchema)
+    ```
+
+### 3. KYC File Form Parser Limits
+*   **Risk:** Multer handles profile picture uploads and KYC certificates. Rewriting this in clean controllers can disrupt upload validations.
+*   **Mitigation:** Retain Multer middleware inside `routes/worker.js` (the framework input adapter layer), converting files to arrays and passing their target paths to the clean application ports.
+
+---
+
+## Migration Strategy (Clean Architecture Layout)
+
+We will use the **copy-first migration strategy** to build the domain entities and ports before replacing the legacy dependencies:
+
+```text
+backend/src/modules/worker/
+├── domain/
+│   └── entities/Worker.js
+├── application/
+│   ├── ports/
+│   │   ├── WorkerRepositoryPort.js
+│   │   └── LocationPort.js
+│   └── use-cases/
+│       ├── ApproveWorkerKycUseCase.js
+│       ├── RejectWorkerKycUseCase.js
+│       ├── BlockWorkerUseCase.js
+│       ├── UnblockWorkerUseCase.js
+│       ├── UpdateWorkerAvailabilityUseCase.js
+│       ├── FindNearbyWorkersUseCase.js
+│       └── GetWorkerDashboardUseCase.js
+└── infrastructure/
+    ├── persistence/
+    │   ├── schemas/WorkerSchema.js
+    │   ├── mappers/WorkerMapper.js
+    │   └── repositories/MongoWorkerRepository.js
+    └── di/
+        └── container.js
+```
+
+### Migration Order
+
+```mermaid
+flowchart TD
+    A[Step 1: Domain Entities & Ports] --> B[Step 2: Mongoose WorkerSchema & Mappers]
+    B --> C[Step 3: MongoDB Worker Repository Adapters]
+    C --> D[Step 4: Use Cases Implementation]
+    D --> E[Step 5: Awilix Dependency Wires]
+    E --> F[Step 6: clean WorkerController & Router]
+    F --> G[Step 7: Deploy Models & Routes Proxy Wrappers]
+    G --> H[Step 8: Automated Test Execution]
+```
+
+1.  **Proxy wrappers creation:**
+    *   Rewrite `backend/src/models/Worker.js` to proxy database schema mappings to the clean architecture `WorkerSchema.js`.
+    *   Rewrite `backend/src/controllers/workerController.js` to resolve use cases from the DI container.
+    *   Rewrite `backend/src/routes/worker.js` to dispatch HTTP requests to the DI-wired controllers.
+
+---
+
+## Rollback Strategy
+If any issues are discovered:
+1.  Revert the proxy wrappers:
+    ```bash
+    git restore src/models/Worker.js src/controllers/workerController.js src/routes/worker.js
+    ```
+2.  The legacy files are restored instantly, and clean architecture packages are left inert in the repository.
+
+---
+
+## Verification & Test Impact Strategy
+
+### Automated Tests
+*   Run the full test suite:
+    ```bash
+    npm run test
+    ```
+*   Assert all tests in `cleanAuth.test.js`, `bookingStateMachine.test.js`, and `paymentRedirect.test.js` pass with a 100% success rate.
+
+### Manual Verification
+*   Verify Nearby Search: Hit `GET /api/v1/workers/nearby?lng=80.9462&lat=26.8467&radius=10` and check recommendation score calculations.
+*   Verify dashboard sync: Load `/api/v1/workers/:id/dashboard` and verify analytics payload metrics.
+*   Verify KYC updates: Submit KYC status updates (`/approve`, `/reject`, `/block`) and confirm state updates match.

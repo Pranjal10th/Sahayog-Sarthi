@@ -1,0 +1,103 @@
+# Phase 3.2 Worker Module Migration Plan - Revised
+
+This revised plan details the implementation strategy to migrate the Worker module to a Hexagonal / Clean Architecture design pattern, incorporating copy-first isolation boundaries. Under this approach, legacy controllers and routes remain completely untouched and active until all clean use cases, repositories, and indexing schemes are fully validated.
+
+---
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Verification Gateways (Geospatial & Population):**
+> We will verify that Mongoose `Booking.populate('workerId')` and geospatial `2dsphere` index lookups are fully active before introducing proxy wrappers on legacy files.
+
+---
+
+## Open Questions
+
+*No open questions are active.*
+
+---
+
+## Affected Files
+
+### Legacy Entry Points (To Be Proxied ONLY after verification)
+*   **Model Wrapper:** [src/models/Worker.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/models/Worker.js)
+*   **Controller Wrapper:** [src/controllers/workerController.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/controllers/workerController.js)
+*   **Router Wrapper:** [src/routes/worker.js](file:///c:/Users/bibha/Desktop/sahayog-sarthi/backend/src/routes/worker.js)
+
+### Clean Architecture Components (New Files)
+*   `Worker domain entity`: `src/modules/worker/domain/entities/Worker.js`
+*   `Repository port`: `src/modules/worker/application/ports/WorkerRepositoryPort.js`
+*   `Location port`: `src/modules/worker/application/ports/LocationPort.js`
+*   `Use Cases`:
+    *   `src/modules/worker/application/use-cases/ApproveWorkerKycUseCase.js`
+    *   `src/modules/worker/application/use-cases/RejectWorkerKycUseCase.js`
+    *   `src/modules/worker/application/use-cases/BlockWorkerUseCase.js`
+    *   `src/modules/worker/application/use-cases/UnblockWorkerUseCase.js`
+    *   `src/modules/worker/application/use-cases/UpdateWorkerAvailabilityUseCase.js`
+    *   `src/modules/worker/application/use-cases/FindNearbyWorkersUseCase.js`
+    *   `src/modules/worker/application/use-cases/GetWorkerDashboardUseCase.js`
+*   `Persistence schema`: `src/modules/worker/infrastructure/persistence/schemas/WorkerSchema.js`
+*   `Persistence mapper`: `src/modules/worker/infrastructure/persistence/mappers/WorkerMapper.js`
+*   `Mongo Repository adapter`: `src/modules/worker/infrastructure/persistence/repositories/MongoWorkerRepository.js`
+*   `Clean HTTP Controller`: `src/modules/worker/interfaces/http/controllers/WorkerController.js`
+*   `Clean HTTP Router`: `src/modules/worker/interfaces/http/routes/workerRoutes.js`
+
+---
+
+## Updated Migration Order
+
+```mermaid
+flowchart TD
+    Step1[Step 1: Domain Entities & Ports] --> Step2[Step 2: Mongoose WorkerSchema & Mappers]
+    Step2 --> Step3[Step 3: MongoDB Worker Repository Adapters]
+    Step3 --> Step4[Step 4: Use Cases Implementation]
+    Step4 --> Step5[Step 5: Awilix Dependency registration]
+    Step5 --> Step6[Step 6: clean WorkerController & Router]
+    Step6 --> Step7[Step 7: Verification Sub-phase -- Indices & populates]
+    Step7 --> Step8[Step 8: Replace models/Worker.js wrapper]
+    Step8 --> Step9[Step 9: Replace controllers and routes wrappers]
+    Step9 --> Step10[Step 10: Final integration test execution]
+```
+
+### Phase A: Copy-First Development (No legacy code changed)
+1.  **Domain & Port Layout:** Build the pure business objects and interface descriptors.
+2.  **Persistence Adapters:** Implement the `WorkerSchema` and database mapper.
+3.  **Use Cases Development:** Code the 7 Sarthi management use cases.
+4.  **Presentation Controllers:** Build the clean HTTP request routers and controllers.
+5.  **DI Containers:** Map dependencies in the Awilix container.
+
+### Phase B: Pre-Proxy Verification
+1.  **Index build validation:** Boot database and verify `location` collection is indexed under `2dsphere`.
+2.  **Booking population validation:** Run query script to confirm `Booking.populate('workerId')` works across both schemas.
+3.  **Proximity scan validation:** Run tests to verify nearby lookup results return correctly.
+4.  **Integrations verification:** Run Jest tests before proxy wrapper deployment.
+
+### Phase C: Wrapper Deployment (Routing swap)
+1.  **Model Swap:** Route `models/Worker.js` to proxy to the clean schema.
+2.  **Controller & Routes Swap:** Connect legacy routing calls to resolve via DI controllers.
+3.  **Refactoring cleanup:** Clean unused code imports.
+
+---
+
+## Rollback Strategy
+If any issues are discovered:
+1.  Revert the proxy wrappers:
+    ```bash
+    git restore src/models/Worker.js src/controllers/workerController.js src/routes/worker.js
+    ```
+2.  The legacy files are restored instantly, and clean architecture packages are left inert in the repository.
+
+---
+
+## Updated Verification Checklist
+
+*   [ ] **Geospatial Index verification:**
+    *   Query MongoDB to verify index: `db.workers.getIndexes()` lists index `{ location: "2dsphere" }`.
+    *   Perform proximity search test: Hit `GET /api/v1/workers/nearby` and confirm JSON response coordinates and distances are correct.
+*   [ ] **Population verification:**
+    *   Confirm Mongoose populate functionality works: Query a booking and call `.populate('workerId')` to verify it populates Sarthi name, category, and mobile number.
+*   [ ] **Automated Tests passing:**
+    *   Run `npm run test` and check that 23/23 tests pass.
+*   [ ] **Manual route validation:**
+    *   Verify worker registration, KYC updates, and dashboard updates are executed successfully.
