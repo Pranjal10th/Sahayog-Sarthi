@@ -9,6 +9,7 @@ import {
   updateWorkerAvailabilityUseCase,
   findNearbyWorkersUseCase,
   getWorkerDashboardUseCase,
+  getAdminOverviewUseCase,
 } from '../../../infrastructure/di/container.js';
 
 export const getNearbyWorkers = async (req, res) => {
@@ -85,5 +86,14 @@ export const updateWorkerProfile = async (req, res) => {
   } catch (err) {
     const status = err.statusCode || (err.message.includes('not found') ? 404 : 500);
     return res.status(status).json({ success: false, error: err.message });
+  }
+};
+
+export const getAdminOverview = async (req, res) => {
+  try {
+    const data = await getAdminOverviewUseCase.execute();
+    return res.status(200).json({ success: true, ...data });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
   }
 };

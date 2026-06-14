@@ -5,11 +5,11 @@ import cors from 'cors';
 import env from './config/env.js'; // Validates env vars on import – crashes early if missing
 import rateLimit from 'express-rate-limit';
 import connectDB from './config/db.js';
-import authRoutes from './routes/auth.js';
-import workerRoutes from './routes/worker.js';
-import bookingRoutes from './routes/booking.js';
-import paymentRoutes from './routes/payment.js';
-import reviewRoutes from './routes/review.js'; 
+import authRoutes from './modules/auth/interfaces/http/routes/authRoutes.js';
+import workerRoutes from './modules/worker/interfaces/http/routes/workerRoutes.js';
+import bookingRoutes from './modules/booking/interfaces/http/routes/bookingRoutes.js';
+import paymentRoutes from './modules/payment/interfaces/http/routes/paymentRoutes.js';
+import reviewRoutes from './modules/review/interfaces/http/routes/reviewRoutes.js'; 
 import { initSocket } from './services/socketService.js';
 import './services/telegramService.js';
 const app = express();

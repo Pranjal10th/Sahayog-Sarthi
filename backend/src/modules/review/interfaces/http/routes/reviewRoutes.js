@@ -2,8 +2,8 @@
 
 import express from 'express';
 import { createReview } from '../controllers/ReviewController.js';
-import { validateReviewSubmission } from '../../../../../../middlewares/validationMiddleware.js';
-import protect from '../../../../../../middlewares/authMiddleware.js';
+import { validateReviewSubmission } from '../../../../../middlewares/validationMiddleware.js';
+import protect from '../../../../../middlewares/authMiddleware.js';
 
 const router = express.Router();
 

@@ -11,7 +11,7 @@ import {
   getBookingById,
   getBookingHistory,
 } from '../controllers/BookingController.js';
-import { getChatHistory } from '../../../../../controllers/chatController.js';
+import { getChatHistory } from '../../../../chat/interfaces/http/controllers/ChatController.js';
 import { validateBookingCreation } from '../../../../../middlewares/validationMiddleware.js';
 import protect from '../../../../../middlewares/authMiddleware.js';
 

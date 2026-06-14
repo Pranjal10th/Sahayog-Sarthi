@@ -13,6 +13,7 @@ import {
   blockWorkerAccount,
   unblockWorkerAccount,
   updateWorkerProfile,
+  getAdminOverview,
 } from '../controllers/WorkerController.js';
 
 const router = express.Router();
@@ -40,11 +41,7 @@ const upload = multer({
 
 // --- Routes ---
 router.get('/nearby',               getNearbyWorkers);
-router.get('/admin/overview',       protect, async (req, res) => {
-  // Admin overview hub — still served by legacy controller; this placeholder ensures
-  // no 404 when switching routers in Phase C
-  return res.status(501).json({ message: 'Admin overview not yet migrated to clean module.' });
-});
+router.get('/admin/overview',       protect, getAdminOverview);
 router.get('/:id/dashboard',        protect, getWorkerDashboardData);
 router.put('/:id/approve',          protect, approveWorkerKYC);
 router.put('/:id/reject',           protect, rejectWorkerKYC);

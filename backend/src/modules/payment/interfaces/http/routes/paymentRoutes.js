@@ -6,7 +6,7 @@ import {
   verifyPaymentSignature,
   requestWalletWithdrawal
 } from '../controllers/PaymentController.js';
-import protect from '../../../../../../middlewares/authMiddleware.js';
+import protect from '../../../../../middlewares/authMiddleware.js';
 
 const router = express.Router();
 

@@ -8,10 +8,10 @@ import User from '../src/models/User.js';
 import { generateToken } from '../src/services/authService.js';
 
 // Setup basic Express app matching index.js for test router target
-import authRoutes from '../src/routes/auth.js';
-import workerRoutes from '../src/routes/worker.js';
-import bookingRoutes from '../src/routes/booking.js';
-import paymentRoutes from '../src/routes/payment.js';
+import authRoutes from '../src/modules/auth/interfaces/http/routes/authRoutes.js';
+import workerRoutes from '../src/modules/worker/interfaces/http/routes/workerRoutes.js';
+import bookingRoutes from '../src/modules/booking/interfaces/http/routes/bookingRoutes.js';
+import paymentRoutes from '../src/modules/payment/interfaces/http/routes/paymentRoutes.js';
 
 const app = express();
 app.use(express.json());

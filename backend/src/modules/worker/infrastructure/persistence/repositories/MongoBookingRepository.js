@@ -15,4 +15,10 @@ export default class MongoBookingRepository {
   async getDistinctBookingIds(workerId) {
     return await Booking.find({ workerId }).distinct('_id');
   }
+
+  async findLiveBookings() {
+    return await Booking.find({
+      status: { $in: ['pending', 'accepted', 'in_progress'] }
+    }).sort({ createdAt: -1 });
+  }
 }

@@ -12,4 +12,8 @@ export default class MongoPaymentRepository {
       .sort({ createdAt: -1 })
       .limit(limit);
   }
+
+  async findPaidPayments() {
+    return await Payment.find({ status: 'paid' });
+  }
 }
