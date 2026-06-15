@@ -7,27 +7,9 @@ import axios from 'axios';
 import dynamic from 'next/dynamic';
 import withAuth from '../../components/withAuth.js';
 
-const MapContainer = dynamic(() => import('react-leaflet').then((mod) => mod.MapContainer), { ssr: false });
-const TileLayer = dynamic(() => import('react-leaflet').then((mod) => mod.TileLayer), { ssr: false });
-const Marker = dynamic(() => import('react-leaflet').then((mod) => mod.Marker), { ssr: false });
-const Polyline = dynamic(() => import('react-leaflet').then((mod) => mod.Polyline), { ssr: false });
-const useMap = dynamic(() => import('react-leaflet').then((mod) => mod.useMap), { ssr: false });
+const BookingMap = dynamic(() => import('../../components/BookingMap.js'), { ssr: false });
 
 let socket;
-
-function LeafletStyles() {
-  return (
-    <Head>
-      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    </Head>
-  );
-}
-
-function ChangeMapView({ center }) {
-  const map = useMap();
-  if (center[0] && center[1]) map.setView(center, map.getZoom());
-  return null;
-}
 
 function BookingTracker() {
   const router = useRouter();
@@ -219,19 +201,11 @@ function BookingTracker() {
 
         {/* RIGHT FULL-SCALE GEOSPATIAL MAP VIEWPORT CONTAINER */}
         <div className="md:col-span-2 relative bg-slate-100 h-full">
-          {typeof window !== 'undefined' ? (
-            <MapContainer center={workerLocation.lat ? [workerLocation.lat, workerLocation.lng] : customerLocation} zoom={14} style={{ width: '100%', height: '100%', zIndex: 1 }}>
-              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-              <Marker position={customerLocation}></Marker>
-              {workerLocation.lat && (
-                <>
-                  <Marker position={[workerLocation.lat, workerLocation.lng]}></Marker>
-                  <Polyline positions={polylinePath} color="#2563eb" weight={4} dashArray="5, 10" />
-                  <ChangeMapView center={[workerLocation.lat, workerLocation.lng]} />
-                </>
-              )}
-            </MapContainer>
-          ) : null}
+          <BookingMap
+            workerLocation={workerLocation}
+            customerLocation={customerLocation}
+            polylinePath={polylinePath}
+          />
         </div>
 
       </div>
