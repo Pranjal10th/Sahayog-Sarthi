@@ -30,6 +30,22 @@ export default class VerifyOtpUseCase {
       return { success: false, status: 401, message: 'Invalid OTP code.' };
     }
 
+    // Check Admin mobile configuration
+    const adminMobile = process.env.ADMIN_MOBILE || '9999999999';
+    if (mobile.value === adminMobile) {
+      // OTP matches, invalidate OTP after successful login
+      await this.otpStore.delete(mobile.value);
+
+      const token = this.tokenService.generate({ id: 'admin-root', role: 'admin' });
+
+      return {
+        success: true,
+        token,
+        user: { name: 'Administrator' },
+        role: 'admin'
+      };
+    }
+
     // Check Worker repository first
     const worker = await this.workerRepository.findByMobile(mobile.value);
     if (worker) {

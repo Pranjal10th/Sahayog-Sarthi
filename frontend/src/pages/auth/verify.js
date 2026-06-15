@@ -81,6 +81,8 @@ export default function Verify() {
         alert(`🎉 OTP verified. Welcome!`);
         if (response.data.role === 'worker') {
           router.push('/workers/dashboard');
+        } else if (response.data.role === 'admin') {
+          router.push('/admin');
         } else {
           router.push('/');
         }

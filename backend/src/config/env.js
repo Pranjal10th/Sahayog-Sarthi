@@ -25,6 +25,7 @@ const optionalVars = [
   'MSG91_AUTH_KEY',
   'MSG91_SENDER_ID',
   'MSG91_TEMPLATE_ID',
+  'ADMIN_MOBILE',
 ];
 
 const missing = requiredVars.filter((key) => !process.env[key]);
@@ -58,6 +59,7 @@ const env = {
   MSG91_AUTH_KEY: process.env.MSG91_AUTH_KEY || '',
   MSG91_SENDER_ID: process.env.MSG91_SENDER_ID || '',
   MSG91_TEMPLATE_ID: process.env.MSG91_TEMPLATE_ID || '',
+  ADMIN_MOBILE: process.env.ADMIN_MOBILE || '9999999999',
 };
 
 export default env;

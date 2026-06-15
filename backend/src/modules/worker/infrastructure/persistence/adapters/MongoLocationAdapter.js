@@ -10,6 +10,7 @@ export default class MongoLocationAdapter extends LocationPort {
     const matchQuery = {
       isAvailable: true,
       kycStatus: 'approved',
+      isBlocked: { $ne: true },
     };
 
     if (category) {
